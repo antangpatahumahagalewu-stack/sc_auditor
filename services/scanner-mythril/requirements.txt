@@ -1,0 +1,14 @@
+# scanner-mythril — isolated Python env for Mythril
+# DO NOT add web3 here; mythril brings its own eth-hash 0.3.x dep tree
+
+# Microservice
+fastapi>=0.111.0
+uvicorn[standard]>=0.30.1
+pydantic>=2.7.0
+pydantic-settings>=2.3.0
+structlog>=24.2.0
+httpx>=0.27.0
+python-multipart>=0.0.9
+
+# Analysis tool (isolated — conflicts with web3 6.x eth-hash >=0.5.1)
+mythril==0.24.8

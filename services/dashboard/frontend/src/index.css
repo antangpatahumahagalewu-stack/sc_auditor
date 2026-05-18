@@ -1,0 +1,14 @@
+@import "tailwindcss";
+
+@theme {
+  --color-vyper-50: #f0f0ff;
+  --color-vyper-100: #e0e0ff;
+  --color-vyper-200: #c0c0ff;
+  --color-vyper-300: #a0a0ff;
+  --color-vyper-400: #8080ff;
+  --color-vyper-500: #6c5ce7;
+  --color-vyper-600: #5a4bd1;
+  --color-vyper-700: #4839b8;
+  --color-vyper-800: #3628a0;
+  --color-vyper-900: #241788;
+}

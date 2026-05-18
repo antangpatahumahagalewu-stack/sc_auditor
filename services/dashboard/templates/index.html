@@ -1,0 +1,295 @@
+{% extends "base.html" %}
+{% block content %}
+
+<!-- Welcome -->
+<div class="mb-6">
+    <h2 class="text-2xl font-bold">Welcome to Vyper</h2>
+    <p class="dark:text-[#a1a1aa] light:text-[#71717a] mt-1">
+        Smart contract bug hunting platform — <span id="current-datetime" class="font-mono text-sm"></span>
+    </p>
+</div>
+
+<!-- Stat Cards -->
+<div class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4 mb-8">
+    <div class="card card-hover">
+        <div class="flex items-center justify-between mb-2">
+            <span class="text-sm dark:text-[#a1a1aa] light:text-[#71717a]">Total Audits</span>
+            <span class="text-xs px-2 py-0.5 rounded-full bg-vyper-500/10 text-vyper-400 font-medium">+12%</span>
+        </div>
+        <div class="text-3xl font-bold" id="stat-total-audits">—</div>
+        <div class="text-xs dark:text-[#a1a1aa] light:text-[#71717a] mt-1">Last 30 days</div>
+    </div>
+
+    <div class="card card-hover">
+        <div class="flex items-center justify-between mb-2">
+            <span class="text-sm dark:text-[#a1a1aa] light:text-[#71717a]">Critical Findings</span>
+            <span class="text-xs px-2 py-0.5 rounded-full bg-red-500/10 text-red-400 font-medium">High Risk</span>
+        </div>
+        <div class="text-3xl font-bold text-red-400" id="stat-critical">—</div>
+        <div class="text-xs dark:text-[#a1a1aa] light:text-[#71717a] mt-1">Unresolved</div>
+    </div>
+
+    <div class="card card-hover">
+        <div class="flex items-center justify-between mb-2">
+            <span class="text-sm dark:text-[#a1a1aa] light:text-[#71717a]">TP Rate</span>
+            <span class="text-xs px-2 py-0.5 rounded-full bg-green-500/10 text-green-400 font-medium">Accuracy</span>
+        </div>
+        <div class="text-3xl font-bold text-green-400" id="stat-tp-rate">—</div>
+        <div class="text-xs dark:text-[#a1a1aa] light:text-[#71717a] mt-1">True Positive Rate</div>
+    </div>
+
+    <div class="card card-hover">
+        <div class="flex items-center justify-between mb-2">
+            <span class="text-sm dark:text-[#a1a1aa] light:text-[#71717a]">Daemon Status</span>
+            <span id="stat-daemon-badge" class="text-xs px-2 py-0.5 rounded-full bg-yellow-500/10 text-yellow-400 font-medium">Checking</span>
+        </div>
+        <div class="text-3xl font-bold" id="stat-daemon-status">—</div>
+        <div class="text-xs dark:text-[#a1a1aa] light:text-[#71717a] mt-1" id="stat-daemon-detail">Fetching...</div>
+    </div>
+</div>
+
+<!-- Quick Actions -->
+<div class="card mb-8">
+    <h3 class="font-semibold mb-4">Quick Actions</h3>
+    <div class="flex flex-wrap gap-3">
+        <button onclick="showStartAuditModal()" class="btn-primary flex items-center gap-2">
+            <svg class="w-4 h-4" viewBox="0 0 20 20" fill="currentColor"><path fill-rule="evenodd" d="M10 18a8 8 0 100-16 8 8 0 000 16zm1-11a1 1 0 10-2 0v2H7a1 1 0 100 2h2v2a1 1 0 102 0v-2h2a1 1 0 100-2h-2V7z" clip-rule="evenodd"/></svg>
+            Start Audit
+        </button>
+        <button onclick="toggleDaemon()" id="btn-toggle-daemon" class="btn-secondary flex items-center gap-2">
+            <svg class="w-4 h-4" viewBox="0 0 20 20" fill="currentColor"><path fill-rule="evenodd" d="M11.3 1.046A1 1 0 0112 2v5h4a1 1 0 01.82 1.573l-7 10A1 1 0 018 18v-5H4a1 1 0 01-.82-1.573l7-10a1 1 0 011.12-.38z" clip-rule="evenodd"/></svg>
+            <span id="btn-daemon-label">Toggle Daemon</span>
+        </button>
+        <button onclick="runSync()" class="btn-secondary flex items-center gap-2">
+            <svg class="w-4 h-4" viewBox="0 0 20 20" fill="currentColor"><path fill-rule="evenodd" d="M4 2a1 1 0 011 1v2.101a7.002 7.002 0 0111.601 2.566 1 1 0 11-1.885.666A5.002 5.002 0 005.999 7H9a1 1 0 010 2H4a1 1 0 01-1-1V3a1 1 0 011-1zm.008 9.057a1 1 0 011.276.61A5.002 5.002 0 0014.001 13H11a1 1 0 110-2h5a1 1 0 011 1v5a1 1 0 11-2 0v-2.101a7.002 7.002 0 01-11.601-2.566 1 1 0 01.61-1.276z" clip-rule="evenodd"/></svg>
+            Run Sync
+        </button>
+    </div>
+</div>
+
+<!-- Recent Audits -->
+<div class="card">
+    <div class="flex items-center justify-between mb-4">
+        <h3 class="font-semibold">Recent Audits</h3>
+        <a href="/audits" class="text-sm text-vyper-400 hover:text-vyper-300">View all →</a>
+    </div>
+    <div class="overflow-x-auto">
+        <table class="w-full">
+            <thead>
+                <tr>
+                    <th class="table-header text-left">Audit ID</th>
+                    <th class="table-header text-left">Program</th>
+                    <th class="table-header text-left">Chain</th>
+                    <th class="table-header text-left">Status</th>
+                    <th class="table-header text-right">Findings</th>
+                    <th class="table-header text-right">Duration</th>
+                    <th class="table-header text-left">Date</th>
+                </tr>
+            </thead>
+            <tbody id="recent-audits-body">
+                <tr class="table-row">
+                    <td class="table-cell" colspan="7" class="text-center dark:text-[#a1a1aa] light:text-[#71717a]">Loading audits...</td>
+                </tr>
+            </tbody>
+        </table>
+    </div>
+</div>
+
+<!-- Start Audit Modal -->
+<div id="audit-modal" class="fixed inset-0 z-50 hidden items-center justify-center bg-black/50" onclick="if(event.target===this)hideStartAuditModal()">
+    <div class="card w-full max-w-md mx-4" onclick="event.stopPropagation()">
+        <h3 class="font-semibold text-lg mb-4">Start New Audit</h3>
+        <form id="audit-form" onsubmit="return startAudit(event)">
+            <div class="space-y-4">
+                <div>
+                    <label class="block text-sm font-medium mb-1">Chain</label>
+                    <select name="chain" class="input-field" required>
+                        <option value="ethereum">Ethereum</option>
+                        <option value="bsc">BSC</option>
+                        <option value="polygon">Polygon</option>
+                        <option value="arbitrum">Arbitrum</option>
+                        <option value="optimism">Optimism</option>
+                        <option value="avalanche">Avalanche</option>
+                        <option value="solana">Solana</option>
+                    </select>
+                </div>
+                <div>
+                    <label class="block text-sm font-medium mb-1">Contract Address</label>
+                    <input type="text" name="address" class="input-field font-mono text-xs" placeholder="0x..." required>
+                </div>
+                <div>
+                    <label class="block text-sm font-medium mb-1">Program (optional)</label>
+                    <input type="text" name="program" class="input-field" placeholder="Immunefi program slug">
+                </div>
+                <div>
+                    <label class="block text-sm font-medium mb-1">Priority (0-10)</label>
+                    <input type="number" name="priority" class="input-field" value="5" min="0" max="10">
+                </div>
+            </div>
+            <div class="flex justify-end gap-3 mt-6">
+                <button type="button" onclick="hideStartAuditModal()" class="btn-secondary">Cancel</button>
+                <button type="submit" class="btn-primary">Start Audit</button>
+            </div>
+        </form>
+        <div id="audit-form-error" class="mt-3 text-sm text-red-400 hidden"></div>
+    </div>
+</div>
+
+<script>
+    // ── Load Dashboard Data ──────────────────────
+    async function loadDashboard() {
+        try {
+            const [auditsResp, statsResp, daemonResp, metricsResp] = await Promise.all([
+                fetch('/api/audits?limit=10'),
+                fetch('/api/stats'),
+                fetch('/api/daemon/status'),
+                fetch('/api/metrics'),
+            ]);
+
+            const audits = await auditsResp.json();
+            const stats = await statsResp.json();
+            const daemon = await daemonResp.json();
+            const metrics = await metricsResp.json();
+
+            // Stats
+            const s = stats.data || {};
+            document.getElementById('stat-total-audits').textContent = s.total_audits ?? audits.meta?.total ?? '0';
+
+            // Metrics
+            const m = metrics.data || {};
+            document.getElementById('stat-critical').textContent = m.critical_findings ?? '0';
+            const tpRate = m.true_positive_rate ?? 0;
+            document.getElementById('stat-tp-rate').textContent = (tpRate * 100).toFixed(1) + '%';
+
+            // Daemon
+            const d = daemon.data || {};
+            const dStatus = d.status || 'stopped';
+            const badge = document.getElementById('stat-daemon-badge');
+            const statusEl = document.getElementById('stat-daemon-status');
+            const detailEl = document.getElementById('stat-daemon-detail');
+            if (dStatus === 'running') {
+                badge.textContent = 'Active';
+                badge.className = 'text-xs px-2 py-0.5 rounded-full bg-green-500/10 text-green-400 font-medium';
+                statusEl.textContent = 'Running';
+                detailEl.textContent = 'Last run: ' + (d.last_run_at ? new Date(d.last_run_at).toLocaleString() : 'N/A');
+            } else {
+                badge.textContent = 'Offline';
+                badge.className = 'text-xs px-2 py-0.5 rounded-full bg-red-500/10 text-red-400 font-medium';
+                statusEl.textContent = 'Stopped';
+                detailEl.textContent = 'Click "Toggle Daemon" to start';
+            }
+
+            // Recent audits table
+            const tbody = document.getElementById('recent-audits-body');
+            const items = audits.data || [];
+            if (items.length === 0) {
+                tbody.innerHTML = '<tr class="table-row"><td class="table-cell" colspan="7" class="text-center dark:text-[#a1a1aa]">No audits yet. Start your first audit!</td></tr>';
+                return;
+            }
+            tbody.innerHTML = items.map(a => `
+                <tr class="table-row cursor-pointer" onclick="window.location='/audits/${a.audit_id}'">
+                    <td class="table-cell font-mono text-xs">${a.audit_id?.slice(0, 8) || '—'}...</td>
+                    <td class="table-cell">${a.program || '—'}</td>
+                    <td class="table-cell">${a.chain || '—'}</td>
+                    <td class="table-cell">${statusBadge(a.state || 'PENDING')}</td>
+                    <td class="table-cell text-right">${a.findings_count ?? '—'}</td>
+                    <td class="table-cell text-right font-mono text-xs">${a.duration_seconds ? (a.duration_seconds + 's') : '—'}</td>
+                    <td class="table-cell text-xs">${a.created_at ? new Date(a.created_at).toLocaleDateString() : '—'}</td>
+                </tr>
+            `).join('');
+        } catch (err) {
+            console.error('Dashboard load error:', err);
+        }
+    }
+
+    function statusBadge(state) {
+        const colors = {
+            'COMPLETED': 'bg-green-500/20 text-green-400',
+            'RUNNING': 'bg-blue-500/20 text-blue-400',
+            'PENDING': 'bg-yellow-500/20 text-yellow-400',
+            'FAILED': 'bg-red-500/20 text-red-400',
+            'SCANNING': 'bg-purple-500/20 text-purple-400',
+        };
+        const color = colors[state] || 'bg-gray-500/20 text-gray-400';
+        return `<span class="badge ${color}">${state}</span>`;
+    }
+
+    // ── Audit Modal ──────────────────────────────
+    function showStartAuditModal() {
+        document.getElementById('audit-modal').classList.remove('hidden');
+        document.getElementById('audit-modal').classList.add('flex');
+    }
+    function hideStartAuditModal() {
+        document.getElementById('audit-modal').classList.add('hidden');
+        document.getElementById('audit-modal').classList.remove('flex');
+    }
+    async function startAudit(event) {
+        event.preventDefault();
+        const form = event.target;
+        const data = Object.fromEntries(new FormData(form));
+        const errorEl = document.getElementById('audit-form-error');
+        errorEl.classList.add('hidden');
+        try {
+            const resp = await fetch('/api/audit', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify(data),
+            });
+            if (!resp.ok) {
+                const err = await resp.json();
+                errorEl.textContent = err.meta?.error || 'Failed to start audit';
+                errorEl.classList.remove('hidden');
+                return;
+            }
+            hideStartAuditModal();
+            loadDashboard();
+        } catch (err) {
+            errorEl.textContent = 'Network error: ' + err.message;
+            errorEl.classList.remove('hidden');
+        }
+    }
+
+    // ── Daemon Toggle ────────────────────────────
+    async function toggleDaemon() {
+        const btn = document.getElementById('btn-toggle-daemon');
+        const label = document.getElementById('btn-daemon-label');
+        btn.disabled = true;
+        label.textContent = 'Toggling...';
+        try {
+            // Check current status
+            const statusResp = await fetch('/api/daemon/status');
+            const statusJson = await statusResp.json();
+            const isRunning = statusJson.data?.status === 'running';
+            const endpoint = isRunning ? '/api/daemon/stop' : '/api/daemon/start';
+            await fetch(endpoint, { method: 'POST' });
+            loadDashboard();
+        } catch (err) {
+            console.error('Daemon toggle error:', err);
+        } finally {
+            btn.disabled = false;
+            label.textContent = 'Toggle Daemon';
+        }
+    }
+
+    // ── Sync ─────────────────────────────────────
+    async function runSync() {
+        try {
+            await fetch('/api/daemon/sync', { method: 'POST' });
+            loadDashboard();
+        } catch (err) {
+            console.error('Sync error:', err);
+        }
+    }
+
+    // ── Real-time clock ──────────────────────────
+    function updateDateTime() {
+        const el = document.getElementById('current-datetime');
+        if (el) el.textContent = new Date().toLocaleString('en-US', { weekday: 'long', year: 'numeric', month: 'long', day: 'numeric', hour: '2-digit', minute: '2-digit' });
+    }
+    updateDateTime();
+    setInterval(updateDateTime, 1000);
+
+    // Init
+    document.addEventListener('DOMContentLoaded', loadDashboard);
+</script>
+{% endblock %}

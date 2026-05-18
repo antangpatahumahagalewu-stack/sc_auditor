@@ -1,0 +1,163 @@
+{% extends "base.html" %}
+{% block content %}
+
+<div class="mb-6">
+    <h2 class="text-2xl font-bold">Metrics</h2>
+    <p class="dark:text-[#a1a1aa] light:text-[#71717a] mt-1">Classification performance and tool accuracy</p>
+</div>
+
+<div id="metrics-content">
+    <!-- Stats Cards -->
+    <div class="grid grid-cols-2 lg:grid-cols-4 gap-4 mb-6">
+        <div class="card"><div class="text-2xl font-bold text-vyper-400" id="metric-precision">—</div><div class="text-xs dark:text-[#a1a1aa] mt-1">Precision</div></div>
+        <div class="card"><div class="text-2xl font-bold text-green-400" id="metric-recall">—</div><div class="text-xs dark:text-[#a1a1aa] mt-1">Recall</div></div>
+        <div class="card"><div class="text-2xl font-bold text-blue-400" id="metric-f1">—</div><div class="text-xs dark:text-[#a1a1aa] mt-1">F1 Score</div></div>
+        <div class="card"><div class="text-2xl font-bold" id="metric-total">—</div><div class="text-xs dark:text-[#a1a1aa] mt-1">Total Findings</div></div>
+    </div>
+
+    <!-- Confusion Matrix -->
+    <div class="card mb-6">
+        <h3 class="font-semibold mb-4">Classification Matrix</h3>
+        <div class="grid grid-cols-2 gap-4 max-w-md">
+            <div class="p-4 rounded-lg bg-green-500/10 text-center">
+                <div class="text-3xl font-bold text-green-400" id="matrix-tp">0</div>
+                <div class="text-xs dark:text-[#a1a1aa] mt-1">True Positives</div>
+            </div>
+            <div class="p-4 rounded-lg bg-red-500/10 text-center">
+                <div class="text-3xl font-bold text-red-400" id="matrix-fp">0</div>
+                <div class="text-xs dark:text-[#a1a1aa] mt-1">False Positives</div>
+            </div>
+            <div class="p-4 rounded-lg bg-blue-500/10 text-center">
+                <div class="text-3xl font-bold text-blue-400" id="matrix-tn">0</div>
+                <div class="text-xs dark:text-[#a1a1aa] mt-1">True Negatives</div>
+            </div>
+            <div class="p-4 rounded-lg bg-yellow-500/10 text-center">
+                <div class="text-3xl font-bold text-yellow-400" id="matrix-fn">0</div>
+                <div class="text-xs dark:text-[#a1a1aa] mt-1">False Negatives</div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Per-Tool TP Rate (Bar Chart) -->
+    <div class="card mb-6">
+        <h3 class="font-semibold mb-4">Per-Tool True Positive Rate</h3>
+        <div id="tool-chart" class="flex items-end justify-center gap-8 h-48">
+            <div class="text-center" style="width: 100px;">
+                <div class="h-36 flex items-end justify-center">
+                    <div id="bar-slither" class="bar bg-vyper-500" style="width: 40px; height: 0%;"></div>
+                </div>
+                <div class="text-xs mt-2 dark:text-[#a1a1aa]">Slither</div>
+            </div>
+            <div class="text-center" style="width: 100px;">
+                <div class="h-36 flex items-end justify-center">
+                    <div id="bar-mythril" class="bar bg-purple-500" style="width: 40px; height: 0%;"></div>
+                </div>
+                <div class="text-xs mt-2 dark:text-[#a1a1aa]">Mythril</div>
+            </div>
+            <div class="text-center" style="width: 100px;">
+                <div class="h-36 flex items-end justify-center">
+                    <div id="bar-echidna" class="bar bg-teal-500" style="width: 40px; height: 0%;"></div>
+                </div>
+                <div class="text-xs mt-2 dark:text-[#a1a1aa]">Echidna</div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Per-Tool Breakdown -->
+    <div class="card">
+        <h3 class="font-semibold mb-4">Per-Tool Breakdown</h3>
+        <div class="overflow-x-auto">
+            <table class="w-full">
+                <thead>
+                    <tr>
+                        <th class="table-header text-left">Tool</th>
+                        <th class="table-header text-right">TP</th>
+                        <th class="table-header text-right">FP</th>
+                        <th class="table-header text-right">TN</th>
+                        <th class="table-header text-right">FN</th>
+                        <th class="table-header text-right">TP Rate</th>
+                        <th class="table-header text-right">Precision</th>
+                    </tr>
+                </thead>
+                <tbody id="tool-breakdown-body">
+                    <tr class="table-row">
+                        <td class="table-cell" colspan="7" class="text-center dark:text-[#a1a1aa]">Loading...</td>
+                    </tr>
+                </tbody>
+            </table>
+        </div>
+    </div>
+</div>
+
+<script>
+    async function loadMetrics() {
+        try {
+            const [metricsResp, statsResp] = await Promise.all([
+                fetch('/api/metrics'),
+                fetch('/api/stats'),
+            ]);
+
+            const metrics = await metricsResp.json();
+            const stats = await statsResp.json();
+            const m = metrics.data || {};
+
+            // Stats cards
+            document.getElementById('metric-precision').textContent = m.precision ? (m.precision * 100).toFixed(1) + '%' : '—';
+            document.getElementById('metric-recall').textContent = m.recall ? (m.recall * 100).toFixed(1) + '%' : '—';
+            document.getElementById('metric-f1').textContent = m.f1_score ? (m.f1_score * 100).toFixed(1) + '%' : '—';
+            document.getElementById('metric-total').textContent = m.total_findings ?? stats.data?.total_audits ?? '—';
+
+            // Confusion matrix
+            document.getElementById('matrix-tp').textContent = m.true_positives ?? 0;
+            document.getElementById('matrix-fp').textContent = m.false_positives ?? 0;
+            document.getElementById('matrix-tn').textContent = m.true_negatives ?? 0;
+            document.getElementById('matrix-fn').textContent = m.false_negatives ?? 0;
+
+            // Bar chart
+            const tools = m.per_tool || {};
+            const maxRate = Math.max(
+                tools.slither?.true_positive_rate || 0,
+                tools.mythril?.true_positive_rate || 0,
+                tools.echidna?.true_positive_rate || 0,
+                0.01
+            );
+            const barSlither = document.getElementById('bar-slither');
+            const barMythril = document.getElementById('bar-mythril');
+            const barEchidna = document.getElementById('bar-echidna');
+
+            barSlither.style.height = ((tools.slither?.true_positive_rate || 0) / maxRate * 100) + '%';
+            barSlither.title = (tools.slither?.true_positive_rate || 0) * 100 + '%';
+            barMythril.style.height = ((tools.mythril?.true_positive_rate || 0) / maxRate * 100) + '%';
+            barMythril.title = (tools.mythril?.true_positive_rate || 0) * 100 + '%';
+            barEchidna.style.height = ((tools.echidna?.true_positive_rate || 0) / maxRate * 100) + '%';
+            barEchidna.title = (tools.echidna?.true_positive_rate || 0) * 100 + '%';
+
+            // Tool breakdown table
+            const tbody = document.getElementById('tool-breakdown-body');
+            const toolNames = ['slither', 'mythril', 'echidna'];
+            const toolLabels = { slither: 'Slither', mythril: 'Mythril', echidna: 'Echidna' };
+
+            tbody.innerHTML = toolNames.map(t => {
+                const td = tools[t] || {};
+                const tpRate = td.true_positive_rate || 0;
+                const precision = td.precision || 0;
+                return `
+                    <tr class="table-row">
+                        <td class="table-cell font-medium">${toolLabels[t]}</td>
+                        <td class="table-cell text-right">${td.true_positives ?? 0}</td>
+                        <td class="table-cell text-right">${td.false_positives ?? 0}</td>
+                        <td class="table-cell text-right">${td.true_negatives ?? 0}</td>
+                        <td class="table-cell text-right">${td.false_negatives ?? 0}</td>
+                        <td class="table-cell text-right font-mono text-xs">${(tpRate * 100).toFixed(1)}%</td>
+                        <td class="table-cell text-right font-mono text-xs">${(precision * 100).toFixed(1)}%</td>
+                    </tr>
+                `;
+            }).join('');
+        } catch (err) {
+            console.error('Load metrics error:', err);
+        }
+    }
+
+    document.addEventListener('DOMContentLoaded', loadMetrics);
+</script>
+{% endblock %}

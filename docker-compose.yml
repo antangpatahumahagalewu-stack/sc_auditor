@@ -1,0 +1,230 @@
+version: "3.9"
+
+x-service-base: &service-base
+  build:
+    context: .
+    dockerfile: services/__SERVICE__/Dockerfile
+  networks: [vyper-net]
+  restart: unless-stopped
+  user: "root"
+  logging:
+    driver: "json-file"
+    options:
+      max-size: "10m"
+      max-file: "3"
+
+services:
+  config:
+    <<: *service-base
+    build:
+      context: services/config
+      dockerfile: Dockerfile
+    ports: ["8011:8000"]
+    volumes: [vyper_config:/data/config]
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8000/health"]
+      interval: 10s
+      timeout: 3s
+      retries: 3
+
+  immunefi:
+    <<: *service-base
+    build:
+      context: services/immunefi
+      dockerfile: Dockerfile
+    ports: ["8001:8000"]
+    volumes: [vyper_immunefi:/data/immunefi]
+    depends_on: [config]
+    environment:
+      - CONFIG_URL=http://config:8000
+
+  source:
+    <<: *service-base
+    build:
+      context: services/source
+      dockerfile: Dockerfile
+    ports: ["8002:8000"]
+    volumes: [vyper_source:/data/source]
+    depends_on: [config]
+    environment:
+      - CONFIG_URL=http://config:8000
+
+  scanner:
+    <<: *service-base
+    build:
+      context: services/scanner
+      dockerfile: Dockerfile
+    ports: ["8003:8000"]
+    volumes: [vyper_scanner:/data/scanner]
+    depends_on: [config]
+    environment:
+      - CONFIG_URL=http://config:8000
+      - MYTHRIL_URL=http://scanner-mythril:8013
+
+  scanner-mythril:
+    <<: *service-base
+    build:
+      context: services/scanner-mythril
+      dockerfile: Dockerfile
+    ports: ["8013:8013"]
+    volumes: [vyper_scanner_mythril:/data/scanner-mythril]
+    depends_on: [config]
+    environment:
+      - CONFIG_URL=http://config:8000
+
+  ai:
+    <<: *service-base
+    build:
+      context: services/ai
+      dockerfile: Dockerfile
+    ports: ["8004:8000"]
+    volumes: [vyper_ai:/data/ai]
+    depends_on: [config]
+    environment:
+      - CONFIG_URL=http://config:8000
+      - OPENAI_API_KEY=${OPENAI_API_KEY}
+      - ANTHROPIC_API_KEY=${ANTHROPIC_API_KEY}
+
+  classifier:
+    <<: *service-base
+    build:
+      context: services/classifier
+      dockerfile: Dockerfile
+    ports: ["8005:8000"]
+    volumes:
+      - vyper_classifier:/data/classifier
+      - vyper_learning:/data/learning
+    depends_on: [config]
+    environment:
+      - CONFIG_URL=http://config:8000
+
+  exploit:
+    <<: *service-base
+    build:
+      context: services/exploit
+      dockerfile: Dockerfile
+    ports: ["8006:8006"]
+    volumes:
+      - vyper_exploit:/data/exploit
+      # Allow docker-py inside the exploit container to create/start/stop
+      # ephemeral Anvil containers. The Docker socket MUST be mounted
+      # read-write so the SDK can perform container lifecycle operations.
+      - /var/run/docker.sock:/var/run/docker.sock
+    depends_on: [config]
+    environment:
+      - CONFIG_URL=http://config:8000
+    privileged: false
+    # Run exploit container as root so it can access the mounted Docker
+    # socket at /var/run/docker.sock (needed by docker-py to create Anvil
+    # ephemeral containers). The Dockerfile sets USER appuser; override
+    # here to ensure socket access. For production, consider a more
+    # secure approach (matching host docker group id via group_add).
+    user: "root"
+
+  reporter:
+    <<: *service-base
+    build:
+      context: services/reporter
+      dockerfile: Dockerfile
+    ports: ["8007:8000"]
+    volumes: [vyper_reporter:/data/reporter]
+    depends_on: [config]
+    environment:
+      - CONFIG_URL=http://config:8000
+
+  notifier:
+    <<: *service-base
+    build:
+      context: services/notifier
+      dockerfile: Dockerfile
+    ports: ["8008:8000"]
+    volumes: [vyper_notifier:/data/notifier]
+    depends_on: [config]
+    environment:
+      - CONFIG_URL=http://config:8000
+
+  orchestrator:
+    <<: *service-base
+    build:
+      context: services/orchestrator
+      dockerfile: Dockerfile
+    ports: ["8009:8000"]
+    volumes:
+      - vyper_orchestrator:/data/orchestrator
+      - vyper_learning:/data/learning
+    depends_on:
+      - immunefi
+      - source
+      - scanner
+      - ai
+      - classifier
+      - exploit
+      - reporter
+      - notifier
+      - config
+    environment:
+      - CONFIG_URL=http://config:8000
+
+  webhook:
+    <<: *service-base
+    build:
+      context: services/webhook
+      dockerfile: Dockerfile
+    ports: ["8010:8000"]
+    volumes: [vyper_webhook:/data/webhook]
+    depends_on: [config]
+    environment:
+      - CONFIG_URL=http://config:8000
+
+  upkeep:
+    <<: *service-base
+    build:
+      context: services/upkeep
+      dockerfile: Dockerfile
+    ports: ["8012:8000"]
+    volumes: [vyper_upkeep:/data/upkeep]
+    depends_on: [config]
+    environment:
+      - CONFIG_URL=http://config:8000
+
+  dashboard:
+    <<: *service-base
+    build:
+      context: services/dashboard
+      dockerfile: Dockerfile
+    ports: ["8000:8000"]
+    volumes:
+      - vyper_dashboard:/data/dashboard
+      - vyper_learning:/data/learning
+    depends_on: [orchestrator, config]
+    environment:
+      - CONFIG_URL=http://config:8000
+      - ORCHESTRATOR_URL=http://orchestrator:8000
+      - SCANNER_URL=http://scanner:8000
+      - CLASSIFIER_URL=http://classifier:8000
+      - IMMUNEFI_URL=http://immunefi:8000
+      - SOURCE_URL=http://source:8000
+      - REPORTER_URL=http://reporter:8000
+      - NOTIFIER_URL=http://notifier:8000
+      - EXPLOIT_URL=http://exploit:8006
+
+volumes:
+  vyper_config:
+  vyper_immunefi:
+  vyper_source:
+  vyper_scanner:
+  vyper_scanner_mythril:
+  vyper_ai:
+  vyper_classifier:
+  vyper_exploit:
+  vyper_reporter:
+  vyper_notifier:
+  vyper_orchestrator:
+  vyper_webhook:
+  vyper_upkeep:
+  vyper_dashboard:
+  vyper_learning:
+
+networks:
+  vyper-net:
+    driver: bridge

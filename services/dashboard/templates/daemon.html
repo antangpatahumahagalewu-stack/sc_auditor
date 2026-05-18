@@ -1,0 +1,128 @@
+{% extends "base.html" %}
+{% block content %}
+
+<div class="mb-6">
+    <h2 class="text-2xl font-bold">Daemon Control</h2>
+    <p class="dark:text-[#a1a1aa] light:text-[#71717a] mt-1">Manage the continuous scanning daemon</p>
+</div>
+
+<div id="daemon-content">
+    <!-- Status Card -->
+    <div class="card mb-6">
+        <div class="flex items-center justify-between mb-4">
+            <div class="flex items-center gap-3">
+                <span id="daemon-indicator" class="status-dot offline"></span>
+                <span id="daemon-status-text" class="text-lg font-semibold">Checking...</span>
+            </div>
+            <div class="flex gap-3">
+                <button id="btn-daemon-start" onclick="daemonAction('start')" class="btn-primary">Start</button>
+                <button id="btn-daemon-stop" onclick="daemonAction('stop')" class="btn-danger" disabled>Stop</button>
+                <button id="btn-daemon-sync" onclick="daemonAction('sync')" class="btn-secondary">Sync Now</button>
+            </div>
+        </div>
+    </div>
+
+    <!-- Stats -->
+    <div class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4 mb-6">
+        <div class="card">
+            <span class="text-xs dark:text-[#a1a1aa] light:text-[#71717a]">Total Audited</span>
+            <div class="text-2xl font-bold" id="daemon-total">—</div>
+        </div>
+        <div class="card">
+            <span class="text-xs dark:text-[#a1a1aa] light:text-[#71717a]">Cycles Completed</span>
+            <div class="text-2xl font-bold" id="daemon-cycles">—</div>
+        </div>
+        <div class="card">
+            <span class="text-xs dark:text-[#a1a1aa] light:text-[#71717a]">Last Run</span>
+            <div class="text-sm font-medium" id="daemon-last-run">—</div>
+        </div>
+        <div class="card">
+            <span class="text-xs dark:text-[#a1a1aa] light:text-[#71717a]">Next Run</span>
+            <div class="text-sm font-medium" id="daemon-next-run">—</div>
+        </div>
+    </div>
+
+    <!-- Recent Activity -->
+    <div class="card">
+        <h3 class="font-semibold mb-4">Recent Activity</h3>
+        <div id="daemon-activity" class="space-y-2">
+            <div class="text-sm dark:text-[#a1a1aa] py-4 text-center">Loading activity...</div>
+        </div>
+    </div>
+</div>
+
+<script>
+    async function loadDaemonStatus() {
+        try {
+            const resp = await fetch('/api/daemon/status');
+            const json = await resp.json();
+            const d = json.data || {};
+
+            const isRunning = d.status === 'running';
+            const indicator = document.getElementById('daemon-indicator');
+            const statusText = document.getElementById('daemon-status-text');
+
+            indicator.className = 'status-dot ' + (isRunning ? 'online' : 'offline');
+            statusText.textContent = isRunning ? 'Running' : (d.status === 'paused' ? 'Paused' : 'Stopped');
+
+            document.getElementById('btn-daemon-start').disabled = isRunning;
+            document.getElementById('btn-daemon-stop').disabled = !isRunning;
+
+            document.getElementById('daemon-total').textContent = d.total_contracts_audited ?? '—';
+            document.getElementById('daemon-cycles').textContent = d.total_cycles_completed ?? '—';
+            document.getElementById('daemon-last-run').textContent = d.last_run_at ? new Date(d.last_run_at).toLocaleString() : 'Never';
+            document.getElementById('daemon-next-run').textContent = d.next_run_at ? new Date(d.next_run_at).toLocaleString() : '—';
+
+            // Update sidebar/header indicators
+            updateDaemonUI(d.status, '');
+
+            // Load recent audits as activity
+            loadRecentActivity();
+        } catch (err) {
+            console.error('Daemon status error:', err);
+        }
+    }
+
+    async function loadRecentActivity() {
+        try {
+            const resp = await fetch('/api/audits?limit=20');
+            const json = await resp.json();
+            const items = json.data || [];
+            const container = document.getElementById('daemon-activity');
+
+            if (items.length === 0) {
+                container.innerHTML = '<div class="text-sm dark:text-[#a1a1aa] py-4 text-center">No recent activity</div>';
+                return;
+            }
+
+            container.innerHTML = items.map(a => `
+                <div class="flex items-center gap-3 p-2 rounded-lg dark:bg-[#18181b] light:bg-[#f4f4f5] text-sm">
+                    <span class="status-dot ${a.state === 'COMPLETED' ? 'online' : 'offline'} flex-shrink-0"></span>
+                    <span class="font-mono text-xs flex-shrink-0">${a.audit_id?.slice(0, 8)}...</span>
+                    <span class="dark:text-[#a1a1aa] light:text-[#71717a] flex-1">${a.address ? a.address.slice(0, 10) + '...' : ''} ${a.chain ? '(' + a.chain + ')' : ''}</span>
+                    <span class="badge ${a.state === 'COMPLETED' ? 'bg-green-500/20 text-green-400' : a.state?.endsWith('_FAILED') ? 'bg-red-500/20 text-red-400' : 'bg-yellow-500/20 text-yellow-400'}">${a.state || 'PENDING'}</span>
+                    <span class="text-xs dark:text-[#a1a1aa]">${a.created_at ? new Date(a.created_at).toLocaleDateString() : ''}</span>
+                </div>
+            `).join('');
+        } catch (err) {
+            console.error('Activity load error:', err);
+        }
+    }
+
+    async function daemonAction(action) {
+        const endpoints = {
+            start: '/api/daemon/start',
+            stop: '/api/daemon/stop',
+            sync: '/api/daemon/sync',
+        };
+        try {
+            await fetch(endpoints[action], { method: 'POST' });
+            setTimeout(loadDaemonStatus, 500);
+        } catch (err) {
+            console.error('Daemon action error:', err);
+        }
+    }
+
+    document.addEventListener('DOMContentLoaded', loadDaemonStatus);
+</script>
+{% endblock %}

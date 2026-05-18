@@ -1,0 +1,312 @@
+# Vyper Security Audit Report
+
+## {{ program|capitalize }} — Comprehensive Security Assessment
+
+| Field | Value |
+|-------|-------|
+| **Contract** | `{{ address }}` |
+| **Chain** | {{ chain }} |
+| **Program** | {{ program|capitalize }} |
+| **Audit ID** | `{{ audit_id }}` |
+| **Date** | {{ generated_at[:10] }} |
+| **Audit Type** | Full Smart Contract Security Review |
+| **Status** | Completed |
+
+---
+
+## 1. Executive Summary
+
+{% if metrics -%}
+**Overall Risk Score**: {{ metrics.overall_score }} / 10
+{% endif %}
+
+A comprehensive security assessment was performed on the {{ program|capitalize }}
+protocol contract deployed at `{{ address[:14] }}...{{ address[-6:] }}` on
+{{ chain }}. The audit employed a multi-layered approach combining static
+analysis, symbolic execution, fuzz testing, and AI-assisted vulnerability
+classification.
+
+### Key Findings
+
+| Metric | Value |
+|--------|------:|
+| Total Findings | {{ findings | length }} |
+| True Positives (TP) | {{ metrics.tp if metrics else "—" }} |
+| False Positives (FP) | {{ metrics.fp if metrics else "—" }} |
+| True Negatives (TN) | {{ metrics.tn if metrics else "—" }} |
+| False Negatives (FN) | {{ metrics.fn if metrics else "—" }} |
+| Precision | {{ "%.1f"|format(metrics.precision * 100) if metrics else "—" }}% |
+| Recall | {{ "%.1f"|format(metrics.recall * 100) if metrics else "—" }}% |
+| F1 Score | {{ "%.2f"|format(metrics.f1_score) if metrics else "—" }} |
+
+---
+
+## 2. Scope
+
+### Contracts Audited
+
+{% if source_info and source_info.files -%}
+| File | Lines |
+|------|------:|
+{% for file in source_info.files -%}
+| `{{ file }}` | — |
+{% endfor -%}
+{% else -%}
+Contract `{{ address }}` on {{ chain }}.
+{% endif %}
+
+### Compiler Versions
+
+{% if source_info and source_info.compiler_versions -%}
+{% for ver in source_info.compiler_versions -%}
+- Solidity `{{ ver }}`
+{% endfor -%}
+{% else -%}
+- Determined during scan
+{% endif %}
+
+### Source Code
+
+{% if source_info -%}
+| Detail | Value |
+|--------|-------|
+| **Provider** | {{ source_info.provider }} |
+| **Files** | {{ source_info.file_count }} |
+| **Lines of Code** | {{ source_info.lines_of_code }} |
+| **Has Tests** | {{ "✅ Yes" if source_info.has_tests else "❌ No" }} |
+| **Has Foundry** | {{ "✅ Yes" if source_info.has_foundry else "❌ No" }} |
+| **Full Repo** | {{ "✅ Yes" if source_info.is_full_repo else "❌ Partial" }} |
+{% endif %}
+
+---
+
+## 3. Methodology
+
+The audit was conducted using the following tools and techniques:
+
+### Tools
+
+| Tool | Type | Purpose |
+|------|------|---------|
+| **Slither** | Static Analysis | Taint tracking, data flow analysis, detector rules |
+| **Mythril** | Symbolic Execution | Path exploration, constraint solving |
+| **Echidna** | Fuzz Testing | Property-based fuzzing, invariant testing |
+| **Foundry Forge** | Compilation | Build verification, artifact generation |
+| **AI Classifier** | ML Classification | TP/FP/TN/FN classification, severity reassessment |
+| **Exploit Engine** | Dynamic Testing | On-chain exploit verification via Anvil fork |
+
+### Process
+
+1. **Source Acquisition** — Fetch verified source code from GitHub / Sourcify / Etherscan
+2. **Compilation** — Build with matching Solidity compiler version via solc-select
+3. **Static Analysis** — Run Slither with appropriate configuration tier
+4. **Symbolic Analysis** — Execute Mythril with RPC endpoint for state exploration
+5. **Fuzz Testing** — Run Echidna with auto-generated property tests
+6. **AI Analysis** — Classify findings, reassess severity, generate fix recommendations
+7. **Exploit Verification** — Test TP critical/high findings on forked mainnet state
+8. **Report Generation** — Compile findings into Immunefi and full audit reports
+
+---
+
+## 4. Severity Overview
+
+```
+{{ ascii_chart }}
+```
+
+| Severity | Count |
+|----------|------:|
+{% for severity, count in severity_counts -%}
+| {{ severity | badge }} | {{ count }} |
+{% endfor -%}
+| **Total** | **{{ findings | length }}** |
+
+### Severity Definitions
+
+| Severity | Definition |
+|----------|------------|
+| 🟣 **Critical** | Direct loss of funds, permanent bricking, or governance takeover |
+| 🔴 **High** | Significant fund loss under specific conditions or privilege escalation |
+| 🟠 **Medium** | Partial fund loss, temporary denial of service, or state manipulation |
+| 🟡 **Low** | Best practice violations with minimal direct impact |
+| ⚪ **Info** | Informational observations and code quality suggestions |
+
+---
+
+## 5. Findings Detail
+
+{% for finding in findings -%}
+### {{ loop.index }}. {{ finding.title }}
+
+**Severity**: {{ finding.severity | badge }}
+**Status**: {{ finding.classification | status_badge }}
+**Tool**: `{{ finding.tool }}`
+{% if finding.swc_id %}**SWC ID**: {{ finding.swc_id }}{% endif %}
+**Confidence**: {{ "%.0f"|format(finding.confidence * 100) if finding.confidence else "—" }}%
+{% if finding.contract %}**Location**: `{{ finding.contract }}{% if finding.line %}:{{ finding.line }}{% endif %}`{% endif %}
+
+#### Description
+
+{{ finding.description }}
+
+{% if finding.code_context -%}
+#### Code Context
+
+```solidity
+{{ finding.code_context }}
+```
+{% endif -%}
+
+{% if finding.ai_reasoning -%}
+#### AI Analysis
+
+{{ finding.ai_reasoning }}
+{% endif -%}
+
+{% set exploit = exploit_map.get(finding.id) -%}
+{% if exploit and exploit.success -%}
+#### Exploit Result
+
+| Detail | Value |
+|--------|-------|
+| **Status** | ✅ Confirmed |
+{% if exploit.value_at_risk %} **Value at Risk** | ${{ "%.0f"|format(exploit.value_at_risk) }} |{% endif %}
+{% if exploit.tx_hash %} **Transaction** | `{{ exploit.tx_hash }}` |{% endif %}
+{% if exploit.gas_used %} **Gas Used** | {{ "{:,}"|format(exploit.gas_used) }} |{% endif %}
+{% if exploit.exploit_contract %} **Exploit Contract** | `{{ exploit.exploit_contract }}` |{% endif %}
+
+{% if exploit.call_sequence -%}
+**Call Sequence**:
+{% for step in exploit.call_sequence -%}
+1. `{{ step }}`
+{% endfor -%}
+{% endif -%}
+{% endif -%}
+
+#### Recommendation
+
+{{ finding.recommendation or "Review and apply appropriate fix." }}
+
+{% if not loop.last -%}
+---
+{% endif -%}
+{% endfor -%}
+
+---
+
+## 6. Metrics & Performance
+
+### Classification Summary
+
+| Metric | Value |
+|--------|------:|
+| True Positives (TP) | {{ metrics.tp if metrics else 0 }} |
+| False Positives (FP) | {{ metrics.fp if metrics else 0 }} |
+| True Negatives (TN) | {{ metrics.tn if metrics else 0 }} |
+| False Negatives (FN) | {{ metrics.fn if metrics else 0 }} |
+| **Precision** | {{ "%.1f"|format(metrics.precision * 100) if metrics else 0 }}% |
+| **Recall** | {{ "%.1f"|format(metrics.recall * 100) if metrics else 0 }}% |
+| **F1 Score** | {{ "%.2f"|format(metrics.f1_score) if metrics else 0 }} |
+| **Overall Score** | {{ metrics.overall_score if metrics else 0 }} / 10 |
+
+### Tool Performance
+
+{% if tool_metrics -%}
+| Tool | TP | FP | Precision |
+|------|----|----|-----------|
+{% for tm in tool_metrics -%}
+| `{{ tm.tool }}` | {{ tm.tp }} | {{ tm.fp }} | {{ "%.1f"|format(tm.precision * 100) if tm.precision else 0 }}% |
+{% endfor -%}
+{% else -%}
+Tool-level metrics not available.
+{% endif -%}
+
+### TP/FP Breakdown
+
+```
+TP:  {{ "█" * (metrics.tp) if metrics and metrics.tp > 0 else "—" }} {{ metrics.tp if metrics else 0 }}
+FP:  {{ "█" * (metrics.fp) if metrics and metrics.fp > 0 else "—" }} {{ metrics.fp if metrics else 0 }}
+TN:  {{ "█" * (metrics.tn) if metrics and metrics.tn > 0 else "—" }} {{ metrics.tn if metrics else 0 }}
+FN:  {{ "█" * (metrics.fn) if metrics and metrics.fn > 0 else "—" }} {{ metrics.fn if metrics else 0 }}
+```
+
+---
+
+## 7. File Statistics
+
+{% if source_info and source_info.lines_of_code -%}
+| Metric | Value |
+|--------|------:|
+| Total Files | {{ source_info.file_count }} |
+| Lines of Code | {{ source_info.lines_of_code }} |
+| Tests Present | {{ "✅ Yes" if source_info.has_tests else "❌ No" }} |
+| Foundry Setup | {{ "✅ Yes" if source_info.has_foundry else "❌ No" }} |
+{% else -%}
+Source file statistics not available.
+{% endif -%}
+
+---
+
+## 8. Appendix A — Tool Configuration
+
+### Slither Configuration
+
+- **Tier**: {{ config_tier | default("default") }}
+- **Detectors**: All enabled by default
+- **Excluded Detectors**: None
+
+### Mythril Configuration
+
+- **Analysis Timeout**: {{ mythril_timeout | default(300) }}s
+- **RPC Endpoint**: Forked node (Anvil) for state exploration
+
+### Echidna Configuration
+
+- **Test Timeout**: {{ echidna_timeout | default(600) }}s
+- **Test Mode**: Property-based with auto-generated harness
+- **Sequence Length**: 100 max
+
+---
+
+## 9. Appendix B — Raw Scanner Output
+
+Raw scanner output files are stored alongside this report:
+
+| Tool | Path |
+|------|------|
+| Slither | `scans/slither.json` |
+| Mythril | `scans/mythril.json` |
+| Echidna | `scans/echidna.json` |
+
+---
+
+## 10. Appendix C — Exploit Details
+
+{% if exploit_results -%}
+{% for er in exploit_results -%}
+### Finding {{ er.finding_id }}
+
+| Detail | Value |
+|--------|-------|
+| **Status** | {{ "✅ Confirmed" if er.success else "❌ Failed" }} |
+{% if er.value_at_risk %} **Value at Risk** | ${{ "%.0f"|format(er.value_at_risk) }} |{% endif %}
+{% if er.tx_hash %} **Transaction Hash** | `{{ er.tx_hash }}` |{% endif %}
+{% if er.gas_used %} **Gas Used** | {{ "{:,}"|format(er.gas_used) }} |{% endif %}
+
+{% if er.poc_script -%}
+<details>
+<summary>📄 PoC Contract</summary>
+
+```solidity
+{{ er.poc_script }}
+```
+</details>
+{% endif -%}
+{% endfor -%}
+{% else -%}
+No exploit results available.
+{% endif -%}
+
+---
+
+*Report generated by Vyper Security Auditor — {{ generated_at }}*
