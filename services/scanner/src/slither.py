@@ -89,10 +89,19 @@ class SlitherRunner:
                 duration_seconds=time.monotonic() - start,
             )
 
-        # Build the command
+        # Build the command — pass individual .sol files, not the directory
+        sol_files = sorted(source_path.rglob("*.sol"))
+        if not sol_files:
+            return ToolResult(
+                tool=tool_name,
+                success=False,
+                error=f"No .sol files found in {source_dir}",
+                duration_seconds=time.monotonic() - start,
+            )
+
         cmd = [
             self._bin,
-            str(source_path),
+            *[str(f) for f in sol_files],
             "--json",
             "-",  # stdout
             "--solc-ast",  # include AST for better results

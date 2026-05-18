@@ -592,6 +592,82 @@ async def api_generate_report(body: dict) -> JSONResponse:
         return _err(f"Failed to generate report: {e}", status_code=502)
 
 
+# ── Agent ────────────────────────────────────────────────────────
+
+@app.get("/api/agent/health")
+async def api_agent_health() -> JSONResponse:
+    """Agent service health check."""
+    try:
+        result = await proxy.get_agent_health()
+        return _ok(data=result.get("data"))
+    except Exception as e:
+        logger.error("Agent health failed", error=str(e))
+        return _err("Agent unreachable", status_code=502)
+
+
+@app.post("/api/agent/team/run")
+async def api_agent_team_run(body: dict) -> JSONResponse:
+    """Run a team-based audit."""
+    try:
+        result = await proxy.run_team_audit(
+            task_type=body.get("task_type", "full_audit"),
+            input_data=body.get("input_data", {}),
+            goal=body.get("goal", ""),
+            max_delegations=body.get("max_delegations", 15),
+        )
+        return _ok(data=result.get("data"))
+    except Exception as e:
+        logger.error("Agent team run failed", error=str(e))
+        return _err(f"Agent run failed: {e}", status_code=502)
+
+
+@app.get("/api/agent/team/sessions")
+async def api_agent_team_sessions(
+    limit: int = Query(20, ge=1, le=100),
+    status: str | None = Query(None),
+) -> JSONResponse:
+    """List team audit sessions."""
+    try:
+        result = await proxy.get_team_sessions(limit=limit, status=status)
+        return _ok(data=result.get("data"))
+    except Exception as e:
+        logger.error("List team sessions failed", error=str(e))
+        return _err(f"Failed: {e}", status_code=502)
+
+
+@app.get("/api/agent/team/{session_id}")
+async def api_agent_team_session(session_id: str) -> JSONResponse:
+    """Get team session detail."""
+    try:
+        result = await proxy.get_team_session(session_id)
+        return _ok(data=result.get("data"))
+    except Exception as e:
+        logger.error("Get team session failed", session_id=session_id, error=str(e))
+        return _err(f"Failed: {e}", status_code=502)
+
+
+@app.get("/api/agent/team/structure")
+async def api_agent_team_structure() -> JSONResponse:
+    """Get team organizational structure."""
+    try:
+        result = await proxy.get_team_structure()
+        return _ok(data=result.get("data"))
+    except Exception as e:
+        logger.error("Get team structure failed", error=str(e))
+        return _err(f"Failed: {e}", status_code=502)
+
+
+@app.get("/api/agent/skills")
+async def api_agent_skills() -> JSONResponse:
+    """List all agent skills."""
+    try:
+        result = await proxy.get_agent_skills()
+        return _ok(data=result.get("data"))
+    except Exception as e:
+        logger.error("Get agent skills failed", error=str(e))
+        return _err(f"Failed: {e}", status_code=502)
+
+
 # ── Daemon (from Dashboard API, additional) ─────────────────────
 
 @app.post("/api/daemon/sync")

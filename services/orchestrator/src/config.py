@@ -21,16 +21,16 @@ class OrchestratorConfig(BaseSettings):
     port: int = 8009
     log_level: str = "INFO"
 
-    # --- Upstream Service URLs ---
-    immunefi_url: str = "http://immunefi:8001"
-    source_url: str = "http://source:8002"
-    scanner_url: str = "http://scanner:8003"
-    ai_url: str = "http://ai:8004"
-    classifier_url: str = "http://classifier:8005"
+    # --- Upstream Service URLs (Docker internal ports) ---
+    immunefi_url: str = "http://immunefi:8000"
+    source_url: str = "http://source:8000"
+    scanner_url: str = "http://scanner:8000"
+    ai_url: str = "http://ai:8000"
+    classifier_url: str = "http://classifier:8000"
     exploit_url: str = "http://exploit:8006"
     reporter_url: str = "http://reporter:8007"
-    notifier_url: str = "http://notifier:8008"
-    upkeep_url: str = "http://upkeep:8010"
+    notifier_url: str = "http://notifier:8000"
+    upkeep_url: str = "http://upkeep:8000"
 
     # --- Data Persistence ---
     data_dir: str = "/data/orchestrator"

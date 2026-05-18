@@ -53,6 +53,9 @@ class ServiceURLs:
     exploit: str = field(
         default_factory=lambda: _env_or("EXPLOIT_URL", "http://localhost:8006")
     )
+    agent: str = field(
+        default_factory=lambda: _env_or("AGENT_URL", "http://localhost:8014")
+    )
 
 
 # ── Retry decorator ─────────────────────────────────────────────
@@ -294,6 +297,75 @@ class ServiceProxy:
             f"{self.urls.reporter}/generate",
             json={"audit_id": audit_id, "format": format},
         )
+
+
+    # ═══════════════════════════════════════════════════════════
+    # Agent Service
+    # ═══════════════════════════════════════════════════════════
+
+    async def get_team_structure(self) -> Dict[str, Any]:
+        return await self._get(f"{self.urls.agent}/team/structure")
+
+    async def run_team_audit(
+        self,
+        task_type: str = "full_audit",
+        input_data: Optional[Dict[str, Any]] = None,
+        goal: str = "",
+        max_delegations: int = 15,
+    ) -> Dict[str, Any]:
+        body = {
+            "task_type": task_type,
+            "input_data": input_data or {},
+            "goal": goal,
+            "max_delegations": max_delegations,
+        }
+        return await self._post(f"{self.urls.agent}/team/run", json=body)
+
+    async def get_team_sessions(
+        self, limit: int = 20, status: Optional[str] = None
+    ) -> Dict[str, Any]:
+        params: Dict[str, Any] = {"limit": limit}
+        if status:
+            params["status"] = status
+        return await self._get(f"{self.urls.agent}/team/sessions", params=params)
+
+    async def get_team_session(self, session_id: str) -> Dict[str, Any]:
+        return await self._get(f"{self.urls.agent}/team/{session_id}")
+
+    async def run_agent(
+        self,
+        task_type: str = "full_audit",
+        input_data: Optional[Dict[str, Any]] = None,
+        goal: str = "",
+        max_steps: int = 25,
+    ) -> Dict[str, Any]:
+        body = {
+            "task_type": task_type,
+            "input_data": input_data or {},
+            "goal": goal,
+            "max_steps": max_steps,
+        }
+        return await self._post(f"{self.urls.agent}/agent/run", json=body)
+
+    async def get_agent_sessions(
+        self, limit: int = 20, status: Optional[str] = None
+    ) -> Dict[str, Any]:
+        params: Dict[str, Any] = {"limit": limit}
+        if status:
+            params["status"] = status
+        return await self._get(f"{self.urls.agent}/agent/sessions", params=params)
+
+    async def get_agent_session(self, session_id: str) -> Dict[str, Any]:
+        return await self._get(f"{self.urls.agent}/agent/{session_id}")
+
+    async def get_agent_skills(self) -> Dict[str, Any]:
+        return await self._get(f"{self.urls.agent}/skills")
+
+    async def get_agent_memory(self) -> Dict[str, Any]:
+        return await self._get(f"{self.urls.agent}/memory")
+
+    async def get_agent_health(self) -> Dict[str, Any]:
+        return await self._get(f"{self.urls.agent}/health")
 
 
 # Module-level singleton

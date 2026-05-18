@@ -11,7 +11,6 @@ Supports GPT-4o, GPT-4, and Claude 3.5 Sonnet with:
 from __future__ import annotations
 
 import json
-import os
 import time
 from typing import Any
 
@@ -248,8 +247,8 @@ class LLMClient:
     retry, circuit breaking, and structured response parsing.
 
     Attributes:
-        openai_key: OpenAI API key (from env OPENAI_API_KEY).
-        anthropic_key: Anthropic API key (from env ANTHROPIC_API_KEY).
+        openai_key: OpenAI API key (from Config Service via frontend Settings).
+        anthropic_key: Anthropic API key (from Config Service via frontend Settings).
         openai_model: OpenAI model name (default: gpt-4o).
         anthropic_model: Anthropic model name (default: claude-3-5-sonnet-20241022).
         preferred_provider: "openai" or "anthropic".
@@ -266,8 +265,8 @@ class LLMClient:
         preferred_provider: Provider = "openai",
         http_client: httpx.AsyncClient | None = None,
     ) -> None:
-        self.openai_key = openai_key or os.getenv("OPENAI_API_KEY", "")
-        self.anthropic_key = anthropic_key or os.getenv("ANTHROPIC_API_KEY", "")
+        self.openai_key = openai_key or ""
+        self.anthropic_key = anthropic_key or ""
         self.openai_model = openai_model
         self.anthropic_model = anthropic_model
         self.preferred_provider = preferred_provider
@@ -331,7 +330,7 @@ class LLMClient:
         """
         if not self.openai_key and not self.anthropic_key:
             raise RuntimeError(
-                "No API keys configured. Set OPENAI_API_KEY or ANTHROPIC_API_KEY."
+                "No API keys configured. Set them via Dashboard → Settings page."
             )
 
         # Build the user prompt

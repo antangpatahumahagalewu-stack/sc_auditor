@@ -1,6 +1,7 @@
 import { BrowserRouter, Routes, Route } from 'react-router-dom';
 import Layout from './Layout';
 import Dashboard from './pages/Dashboard';
+import Agent from './pages/Agent';
 import Audits from './pages/Audits';
 import AuditDetail from './pages/AuditDetail';
 import Programs from './pages/Programs';
@@ -18,6 +19,7 @@ export default function App() {
       <Routes>
         <Route element={<Layout />}>
           <Route path="/" element={<Dashboard />} />
+          <Route path="/agent" element={<Agent />} />
           <Route path="/audits" element={<Audits />} />
           <Route path="/audits/:id" element={<AuditDetail />} />
           <Route path="/programs" element={<Programs />} />

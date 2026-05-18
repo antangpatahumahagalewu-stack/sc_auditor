@@ -146,6 +146,8 @@ class EchidnaRunner:
             str(self._seq_len),
             "--timeout",
             str(effective_timeout),
+            "--solc-args",
+            "--allow-paths .",
         ]
 
         log.info(
@@ -153,6 +155,7 @@ class EchidnaRunner:
             target=target,
             contract=resolved_name,
             timeout=effective_timeout,
+            cwd=str(source_path),
         )
 
         try:
@@ -161,6 +164,7 @@ class EchidnaRunner:
                 capture_output=True,
                 text=True,
                 timeout=effective_timeout + 30,
+                cwd=str(source_path),
             )
         except subprocess.TimeoutExpired:
             log.warning("echidna.timeout", timeout=effective_timeout)
@@ -218,12 +222,29 @@ class EchidnaRunner:
     # Internal helpers
     # ------------------------------------------------------------------
 
+    @staticmethod
+    def _extract_contract_name(content: str) -> str | None:
+        """Extract the first contract/interface/library name from Solidity source."""
+        import re as _re
+        for keyword in ("contract", "interface", "library"):
+            match = _re.search(
+                rf"\b{keyword}\s+(\w+)",
+                content,
+            )
+            if match:
+                return match.group(1)
+        return None
+
     def _find_contract(
         self,
         source_dir: Path,
         contract_name: str | None,
     ) -> tuple[Path | None, str]:
-        """Locate the primary contract file in the source directory."""
+        """Locate the primary contract file in the source directory.
+
+        Returns the file path and the actual Solidity contract name
+        (parsed from source, not the filename).
+        """
         sol_files = list(source_dir.rglob("*.sol"))
         if not sol_files:
             return None, ""
@@ -239,8 +260,11 @@ class EchidnaRunner:
                 if f"contract {contract_name}" in content:
                     return f, contract_name
 
-        # Default: use the first .sol file found
-        return sol_files[0], sol_files[0].stem
+        # Default: use the first .sol file, parse actual contract name
+        target = sol_files[0]
+        content = target.read_text(encoding="utf-8", errors="replace")
+        actual_name = self._extract_contract_name(content) or target.stem
+        return target, actual_name
 
     def _ensure_harness(
         self,

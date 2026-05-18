@@ -68,6 +68,10 @@ class ResourceGovernor:
         await self._semaphores[tool_type].acquire()
         return ResourceGuard(governor=self, tool_type=tool_type)
 
+    def release(self, tool_type: ToolType) -> None:
+        """Release a slot. Called by ResourceGuard on context exit."""
+        self._semaphores[tool_type].release()
+
     async def __aenter__(self) -> "ResourceGovernor":
         return self
 

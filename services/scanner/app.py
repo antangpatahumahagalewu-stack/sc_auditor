@@ -337,7 +337,9 @@ async def run_scan(body: ScanRequest, request: Request) -> ApiResponse:
                 )
 
         # Run tools concurrently (with semaphore limit)
-        tasks = [run_tool(t) for t in tools_to_run if t in SUPPORTED_TOOLS]
+        # Note: 'forge' is a build step (Step 3), not a scan tool — skip it here
+        scan_tools = [t for t in tools_to_run if t in SUPPORTED_TOOLS and t != "forge"]
+        tasks = [run_tool(t) for t in scan_tools]
         if tasks:
             completed = await asyncio.gather(*tasks, return_exceptions=True)
             for result in completed:
@@ -507,13 +509,14 @@ async def _install_tool(tool: str) -> InstallResult:
     """Install or update a single analysis tool."""
     try:
         if tool == "slither":
-            # pip-installable Python tool
+            # pip-installable Python tool (needs setuptools for pkg_resources)
             result = await asyncio.to_thread(
                 subprocess.run,
                 [
                     sys.executable, "-m", "pip", "install",
                     "--upgrade",
                     "slither-analyzer",
+                    "setuptools",
                 ],
                 capture_output=True,
                 text=True,
@@ -535,21 +538,79 @@ async def _install_tool(tool: str) -> InstallResult:
             return await _install_echidna()
 
         elif tool == "forge":
-            # Foundry — use foundryup
-            result = await asyncio.to_thread(
-                subprocess.run,
-                ["foundryup"],
-                capture_output=True,
-                text=True,
-                timeout=180,
-            )
-            if result.returncode == 0:
+            # Foundry — install foundryup first if missing, then run it
+            async def _install_forge() -> InstallResult:
+                # Locate foundryup (common locations)
+                foundryup_bin: str | None = None
+                for candidate in (
+                    "foundryup",
+                    "/root/.foundry/bin/foundryup",
+                    "/home/appuser/.foundry/bin/foundryup",
+                ):
+                    which = await asyncio.to_thread(
+                        subprocess.run,
+                        ["which", candidate],
+                        capture_output=True, text=True,
+                    )
+                    if which.returncode == 0:
+                        foundryup_bin = candidate
+                        break
+                if foundryup_bin is None:
+                    # Install foundryup via curl
+                    log.info("forge.installing_foundryup")
+                    curl = await asyncio.to_thread(
+                        subprocess.run,
+                        ["curl", "-fsSL", "https://foundry.paradigm.xyz", "-o", "/tmp/foundryup.sh"],
+                        capture_output=True, text=True, timeout=60,
+                    )
+                    if curl.returncode != 0:
+                        return InstallResult(
+                            tool=tool, success=False,
+                            error=f"Failed to download foundryup: {curl.stderr.strip()[:300]}",
+                        )
+                    # NOTE: sh foundryup.sh may return non-zero (set -e triggered by
+                    # "could not detect shell" warning) but the binary IS installed.
+                    # We check for binary existence instead of exit code.
+                    await asyncio.to_thread(
+                        subprocess.run,
+                        ["sh", "/tmp/foundryup.sh"],
+                        capture_output=True, text=True, timeout=60,
+                    )
+                    # Check if binary was actually installed
+                    import os as _os
+                    if _os.path.exists("/root/.foundry/bin/foundryup"):
+                        foundryup_bin = "/root/.foundry/bin/foundryup"
+                    else:
+                        return InstallResult(
+                            tool=tool, success=False,
+                            error="foundryup binary not found after install",
+                        )
+                # Run foundryup to install/update forge
+                result = await asyncio.to_thread(
+                    subprocess.run,
+                    [foundryup_bin],
+                    capture_output=True,
+                    text=True,
+                    timeout=300,
+                )
+                if result.returncode != 0:
+                    return InstallResult(
+                        tool=tool,
+                        success=False,
+                        error=result.stderr.strip()[:500],
+                    )
+                # Create symlinks in /usr/local/bin for PATH access
+                FOUNDRY_BINS = ["forge", "cast", "anvil", "chisel"]
+                for bin_name in FOUNDRY_BINS:
+                    src = f"/root/.foundry/bin/{bin_name}"
+                    dst = f"/usr/local/bin/{bin_name}"
+                    await asyncio.to_thread(
+                        subprocess.run,
+                        ["ln", "-sf", src, dst],
+                        capture_output=True, text=True,
+                    )
                 return InstallResult(tool=tool, success=True, version="latest")
-            return InstallResult(
-                tool=tool,
-                success=False,
-                error=result.stderr.strip()[:500],
-            )
+            return await _install_forge()
 
         elif tool == "mythril":
             # Mythril runs in an isolated sidecar (scanner-mythril).
@@ -702,34 +763,87 @@ def _save_results(audit_id: str, response: ScanResponse) -> None:
 
 
 async def _install_echidna() -> InstallResult:
-    """Download and install the Echidna binary."""
-    # Try using pip first (echidna is available on PyPI as echidna)
+    """Download and install the Echidna binary from GitHub releases."""
+    import platform
+
+    # Map platform to GitHub release asset name
+    arch_map = {
+        "x86_64": "amd64",
+        "aarch64": "arm64",
+    }
+    os_map = {
+        "linux": "linux",
+        "darwin": "darwin",
+    }
+    machine = platform.machine()
+    system = platform.system().lower()
+    # Map platform to GitHub release asset arch name
+    arch_map = {"x86_64": "x86_64", "aarch64": "aarch64"}
+    os_map = {"linux": "linux", "darwin": "macos"}
+    target_arch = arch_map.get(machine, machine)
+    target_os = os_map.get(system, system)
+
+    # Fetch latest release tag
     try:
-        result = await asyncio.to_thread(
+        req = await asyncio.to_thread(
             subprocess.run,
             [
-                sys.executable, "-m", "pip", "install",
-                "--upgrade", "echidna",
+                "curl", "-fsSL",
+                "https://api.github.com/repos/crytic/echidna/releases/latest",
             ],
-            capture_output=True,
-            text=True,
-            timeout=120,
+            capture_output=True, text=True, timeout=30,
         )
-        if result.returncode == 0:
-            return InstallResult(
-                tool="echidna",
-                success=True,
-                version="latest (pip)",
-            )
-    except (subprocess.SubprocessError, OSError):
-        pass
+        if req.returncode != 0:
+            return InstallResult(tool="echidna", success=False,
+                                 error=f"GitHub API failed: {req.stderr.strip()[:200]}")
+        import json as _json
+        release = _json.loads(req.stdout)
+        tag = release.get("tag_name", "v2.3.2")
+    except Exception as exc:
+        tag = "v2.3.2"  # fallback
 
-    return InstallResult(
-        tool="echidna",
-        success=False,
-        error="Echidna installation failed. Install manually from "
-        "https://github.com/crytic/echidna/releases",
-    )
+    version_str = tag.lstrip("v")
+    url = f"https://github.com/crytic/echidna/releases/download/{tag}/echidna-{version_str}-{target_arch}-{target_os}.tar.gz"
+    log.info("echidna.downloading", url=url)
+
+    try:
+        dl = await asyncio.to_thread(
+            subprocess.run,
+            ["curl", "-fsSL", url, "-o", "/tmp/echidna.tar.gz"],
+            capture_output=True, text=True, timeout=120,
+        )
+        if dl.returncode != 0:
+            return InstallResult(tool="echidna", success=False,
+                                 error=f"Download failed: {dl.stderr.strip()[:200]}")
+
+        extract = await asyncio.to_thread(
+            subprocess.run,
+            ["tar", "-xzf", "/tmp/echidna.tar.gz", "-C", "/tmp/"],
+            capture_output=True, text=True, timeout=30,
+        )
+        if extract.returncode != 0:
+            return InstallResult(tool="echidna", success=False,
+                                 error=f"Extract failed: {extract.stderr.strip()[:200]}")
+
+        install = await asyncio.to_thread(
+            subprocess.run,
+            ["install", "-m", "755", "/tmp/echidna", "/usr/local/bin/echidna"],
+            capture_output=True, text=True, timeout=30,
+        )
+        if install.returncode != 0:
+            return InstallResult(tool="echidna", success=False,
+                                 error=f"Install failed: {install.stderr.strip()[:200]}")
+
+        # Verify
+        ver = await asyncio.to_thread(
+            subprocess.run,
+            ["echidna", "--version"],
+            capture_output=True, text=True, timeout=30,
+        )
+        version = ver.stdout.strip() or ver.stderr.strip() or "latest"
+        return InstallResult(tool="echidna", success=True, version=version)
+    except Exception as exc:
+        return InstallResult(tool="echidna", success=False, error=str(exc)[:200])
 
 
 def _extract_pip_version(pip_output: str, tool: str) -> str | None:

@@ -142,4 +142,19 @@ export const api = {
   getQueue: () => request<ApiResponse>('/api/queue'),
   addToQueue: (body: { contract_id: string; chain: string; address: string; program?: string; priority_score?: number }) =>
     request<ApiResponse>('/api/queue', { method: 'POST', body: JSON.stringify(body) }),
+
+  // Agent
+  getAgentHealth: () => request<ApiResponse>('/api/agent/health'),
+  getTeamStructure: () => request<ApiResponse>('/api/agent/team/structure'),
+  runTeamAudit: (body: { task_type?: string; input_data?: Record<string, any>; goal?: string; max_delegations?: number }) =>
+    request<ApiResponse>('/api/agent/team/run', { method: 'POST', body: JSON.stringify(body) }),
+  getTeamSessions: (params?: { limit?: number; status?: string }) => {
+    const qs = new URLSearchParams();
+    if (params?.limit) qs.set('limit', String(params.limit));
+    if (params?.status) qs.set('status', params.status);
+    const q = qs.toString();
+    return request<ApiResponse>(`/api/agent/team/sessions${q ? '?' + q : ''}`);
+  },
+  getTeamSession: (sessionId: string) => request<ApiResponse>(`/api/agent/team/${sessionId}`),
+  getAgentSkills: () => request<ApiResponse>('/api/agent/skills'),
 };

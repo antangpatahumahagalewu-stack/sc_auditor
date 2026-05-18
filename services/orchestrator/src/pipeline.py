@@ -256,7 +256,14 @@ class Pipeline:
     # ── Step handlers ───────────────────────────────────────────
 
     async def _fetch_program(self, record: AuditRecord) -> Dict[str, Any]:
-        """Call the Immunefi service to get program details."""
+        """Call the Immunefi service to get program details.
+
+        If no program slug is provided, skip this step gracefully.
+        """
+        if not record.program:
+            logger.info("No program specified for %s — skipping FETCHING_PROGRAM", record.audit_id)
+            return {"status": "skipped", "reason": "no program slug"}
+
         url = f"{config.immunefi_url}/programs/{record.program}"
         resp = await self.client.get(url)
         resp.raise_for_status()
@@ -265,38 +272,81 @@ class Pipeline:
         return data
 
     async def _fetch_source(self, record: AuditRecord) -> Dict[str, Any]:
-        """Call the Source service to fetch contract source code."""
-        url = f"{config.source_url}/source"
+        """Call the Source service to fetch contract source code.
+
+        If source data is already provided in metadata (e.g. via direct upload),
+        skip the external fetch.
+        """
+        # Check if source data already provided
+        existing = record.metadata.get("source_data")
+        if existing and existing.get("sources"):
+            logger.info("Source already in metadata for %s — skipping fetch", record.audit_id)
+            return {"status": "skipped", "reason": "source already in metadata"}
+
+        url = f"{config.source_url}/fetch"
         payload = {"chain": record.chain, "address": record.address}
         resp = await self.client.post(url, json=payload)
         resp.raise_for_status()
         data = resp.json()
-        record.metadata["source_data"] = data.get("data")
+        source_data = data.get("data") or {}
+        record.metadata["source_data"] = source_data
+        # Store compiler version from source for downstream services
+        if source_data.get("compiler_version"):
+            record.metadata["compiler_version"] = source_data["compiler_version"]
         return data
 
     async def _run_scan(self, record: AuditRecord) -> Dict[str, Any]:
         """Call the Scanner service for static/dynamic analysis."""
         url = f"{config.scanner_url}/scan"
+        source_data = record.metadata.get("source_data") or {}
+        sources = source_data.get("sources") or {}
+        compiler = record.metadata.get("compiler_version") or "0.8.20"
         payload = {
             "chain": record.chain,
             "address": record.address,
-            "source": record.metadata.get("source_data"),
-            "program": record.program,
+            "sources": sources,
+            "compiler": compiler,
         }
         resp = await self.client.post(url, json=payload)
         resp.raise_for_status()
         data = resp.json()
         record.metadata["scan_results"] = data.get("data")
+        # Store compiler version from scanner response (authoritative)
+        scan_data = data.get("data") or {}
+        if scan_data.get("compiler"):
+            record.metadata["compiler_version"] = scan_data["compiler"]
         return data
 
     async def _run_ai_analysis(self, record: AuditRecord) -> Dict[str, Any]:
         """Call the AI Service to analyse scan findings."""
         url = f"{config.ai_url}/analyze"
+        source_data = record.metadata.get("source_data") or {}
+        sources = source_data.get("sources") or {}
+        scan_data = record.metadata.get("scan_results") or {}
+        findings_raw = scan_data.get("all_findings") or []
+
+        # Transform scanner findings to AI Finding format
+        ai_findings = []
+        for i, f in enumerate(findings_raw, 1):
+            ai_findings.append({
+                "id": f.get("title", f"F-{i:03d}")[:8],
+                "tool": f.get("tool", "scanner"),
+                "title": f.get("title", ""),
+                "description": f.get("description", ""),
+                "severity": f.get("severity", "informational"),
+                "location": {
+                    "file": f.get("contract"),
+                    "line": f.get("line"),
+                    "snippet": "",
+                },
+            })
+
         payload = {
-            "chain": record.chain,
-            "address": record.address,
-            "findings": record.metadata.get("scan_results"),
-            "program": record.program,
+            "audit_id": record.audit_id,
+            "source": sources,
+            "findings": ai_findings,
+            "compiler": record.metadata.get("compiler_version"),
+            "contract_name": None,
         }
         resp = await self.client.post(url, json=payload)
         resp.raise_for_status()
@@ -307,27 +357,90 @@ class Pipeline:
     async def _classify_findings(self, record: AuditRecord) -> Dict[str, Any]:
         """Call the Classifier service to classify findings."""
         url = f"{config.classifier_url}/classify"
+        ai_results = record.metadata.get("ai_results") or []
+
         payload = {
-            "findings": record.metadata.get("ai_results"),
-            "chain": record.chain,
+            "audit_id": record.audit_id,
+            "findings": ai_results if isinstance(ai_results, list) else [],
         }
         resp = await self.client.post(url, json=payload)
         resp.raise_for_status()
         data = resp.json()
-        record.metadata["classified_findings"] = data.get("data")
-        record.findings = data.get("data")
+        classified = data.get("data") or {}
+        record.metadata["classified_findings"] = classified.get("classified_findings", classified)
+        record.findings = classified.get("classified_findings", classified)
         return data
 
     async def _generate_exploit(self, record: AuditRecord) -> Dict[str, Any]:
-        """Call the Exploit service to generate PoC."""
+        """Call the Exploit service to generate PoC for the most severe finding."""
         url = f"{config.exploit_url}/exploit"
+        source_data = record.metadata.get("source_data") or {}
+        sources = source_data.get("sources") or {}
+
+        # Find the most severe finding with enough context
+        findings = record.findings or record.metadata.get("classified_findings") or []
+        if isinstance(findings, dict):
+            findings = findings.get("classified_findings", findings.get("findings", []))
+
+        if not findings:
+            logger.info("No findings to exploit for %s", record.audit_id)
+            return {"status": "skipped", "reason": "no findings"}
+
+        # Sort by severity: critical > high > medium > low > informational
+        severity_rank = {"critical": 0, "high": 1, "medium": 2, "low": 3, "informational": 4}
+        target = min(
+            findings,
+            key=lambda f: (
+                severity_rank.get(
+                    (f.get("severity") or f.get("ai_severity") or "").lower(), 99
+                ),
+            ),
+        )
+
+        # Extract vulnerable function name from finding data
+        vuln_func = (
+            target.get("function")
+            or target.get("vulnerable_function")
+            or (target.get("location") or {}).get("function")
+            or "unknown"
+        )
+
+        # Map finding title to attack type
+        title_lower = (target.get("title") or "").lower()
+        if "reentrancy" in title_lower:
+            attack_type = "reentrancy"
+        elif "access" in title_lower or "owner" in title_lower or "role" in title_lower:
+            attack_type = "access_control"
+        elif "arithmetic" in title_lower or "overflow" in title_lower:
+            attack_type = "arithmetic"
+        elif "oracle" in title_lower:
+            attack_type = "oracle_manipulation"
+        elif "flash" in title_lower:
+            attack_type = "flash_loan"
+        else:
+            attack_type = "auto"
+
         payload = {
-            "findings": record.findings,
+            "audit_id": record.audit_id,
+            "finding_id": target.get("id", target.get("finding_id", "F-001")),
+            "source": sources,
+            "compiler": record.metadata.get("compiler_version", "0.8.20"),
+            "vulnerable_function": vuln_func,
+            "attack_type": attack_type,
             "chain": record.chain,
-            "address": record.address,
-            "source": record.metadata.get("source_data"),
+            "use_ai": True,
+            "max_hypotheses": 5,
         }
-        resp = await self.client.post(url, json=payload)
+
+        logger.info(
+            "Generating exploit for finding",
+            audit_id=record.audit_id,
+            finding_id=payload["finding_id"],
+            attack_type=attack_type,
+            function=vuln_func,
+        )
+
+        resp = await self.client.post(url, json=payload, timeout=600.0)
         resp.raise_for_status()
         data = resp.json()
         record.metadata["exploit_data"] = data.get("data")
@@ -336,28 +449,86 @@ class Pipeline:
     async def _generate_report(self, record: AuditRecord) -> Dict[str, Any]:
         """Call the Reporter service to generate audit report."""
         url = f"{config.reporter_url}/report"
+        source_data = record.metadata.get("source_data") or {}
+        findings = record.findings or record.metadata.get("classified_findings") or []
+        if isinstance(findings, dict):
+            findings = findings.get("classified_findings", findings.get("findings", []))
+
+        # Build source info
+        source_info = {
+            "provider": source_data.get("provider", ""),
+            "files": list(source_data.get("sources", {}).keys()),
+            "file_count": len(source_data.get("sources", {})),
+            "lines_of_code": sum(
+                len(c.splitlines()) for c in (source_data.get("sources") or {}).values()
+            ),
+            "has_tests": False,
+            "has_foundry": False,
+            "is_full_repo": False,
+            "compiler_versions": [record.metadata.get("compiler_version")]
+            if record.metadata.get("compiler_version")
+            else [],
+        }
+
+        # Build exploit results list
+        exploit_data = record.metadata.get("exploit_data") or {}
+        exploit_results = [exploit_data] if exploit_data else []
+
         payload = {
             "audit_id": record.audit_id,
+            "program": record.program or "",
             "chain": record.chain,
             "address": record.address,
-            "findings": record.findings,
-            "exploit_data": record.metadata.get("exploit_data"),
-            "scan_results": record.metadata.get("scan_results"),
+            "findings": findings if isinstance(findings, list) else [],
+            "metrics": None,
+            "exploit_results": exploit_results,
+            "source_info": source_info,
         }
         resp = await self.client.post(url, json=payload)
         resp.raise_for_status()
         data = resp.json()
-        record.report_path = (data.get("data") or {}).get("report_path")
-        record.metadata["report_data"] = data.get("data")
+        report_data = data.get("data") or {}
+        if isinstance(report_data, dict):
+            record.report_path = report_data.get("immunefi_path") or report_data.get("full_path")
+        record.metadata["report_data"] = report_data
         return data
 
     async def _notify(self, record: AuditRecord) -> Dict[str, Any]:
         """Call the Notifier service to send notifications."""
         url = f"{config.notifier_url}/notify"
+
+        # Count findings by severity
+        findings = record.findings or record.metadata.get("classified_findings") or []
+        if isinstance(findings, dict):
+            findings = findings.get("classified_findings", findings.get("findings", []))
+        if not isinstance(findings, list):
+            findings = []
+
+        critical_count = sum(
+            1 for f in findings
+            if (f.get("severity") or f.get("ai_severity") or "").lower() == "critical"
+        )
+        high_count = sum(
+            1 for f in findings
+            if (f.get("severity") or f.get("ai_severity") or "").lower() == "high"
+        )
+
+        summary = (
+            f"Audit {record.audit_id[:8]} — "
+            f"{len(findings)} findings: "
+            f"{critical_count} critical, {high_count} high"
+        )
+
         payload = {
+            "type": "audit_complete",
+            "channel": "all",
             "audit_id": record.audit_id,
-            "findings": record.findings,
-            "report_path": record.report_path,
+            "findings_count": len(findings),
+            "critical_count": critical_count,
+            "high_count": high_count,
+            "summary": summary,
+            "report_url": record.report_path,
+            "program": record.program,
             "chain": record.chain,
             "address": record.address,
         }
@@ -371,17 +542,17 @@ class Pipeline:
 
     async def _should_run_exploit(self, record: AuditRecord) -> bool:
         """Run exploit generation only if critical or high findings exist."""
-        findings = record.findings or record.metadata.get("classified_findings") or {}
+        findings = record.findings or record.metadata.get("classified_findings") or []
         if isinstance(findings, dict):
-            severity = (findings.get("severity") or "").lower()
-            if severity in ("critical", "high"):
+            findings = findings.get("classified_findings", findings.get("findings", []))
+
+        if not isinstance(findings, list):
+            findings = []
+
+        for f in findings:
+            sev = (f.get("severity") or f.get("ai_severity") or "").lower()
+            if sev in ("critical", "high"):
                 return True
-            # Check in list
-            items = findings.get("items") or findings.get("findings") or []
-            for item in items:
-                sev = (item.get("severity") or "").lower()
-                if sev in ("critical", "high"):
-                    return True
         return False
 
     async def _should_run_report(self, record: AuditRecord) -> bool:

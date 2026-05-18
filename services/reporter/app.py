@@ -268,7 +268,7 @@ async def health(request: Request) -> ApiResponse:
 
 
 @app.post("/report")
-async def generate_report(body: ReportRequest) -> ApiResponse:
+async def generate_report(body: ReportRequest, request: Request) -> ApiResponse:
     """Generate both Immunefi and full audit reports for a completed audit.
 
     Accepts classified findings, metrics, and exploit results, then

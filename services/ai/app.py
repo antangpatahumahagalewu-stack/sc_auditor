@@ -110,13 +110,16 @@ async def _load_ai_config(client: httpx.AsyncClient) -> dict[str, Any]:
         client: HTTP client for Config Service requests.
 
     Returns:
-        Dictionary with keys: openai_model, anthropic_model, max_concurrent_ai.
+        Dictionary with keys: openai_model, anthropic_model, max_concurrent_ai,
+        openai_api_key, anthropic_api_key.
     """
     defaults = {
         "openai_model": "gpt-4o",
         "anthropic_model": "claude-3-5-sonnet-20241022",
         "max_concurrent_ai": 3,
         "preferred_provider": "openai",
+        "openai_api_key": "",
+        "anthropic_api_key": "",
     }
 
     try:
@@ -144,7 +147,23 @@ async def _load_ai_config(client: httpx.AsyncClient) -> dict[str, Any]:
             if data.get("data") and "preferred_provider" in data["data"]:
                 defaults["preferred_provider"] = data["data"]["preferred_provider"]
 
-        log.info("config_loaded_from_service", config=defaults)
+        # API keys — diset via frontend Settings, disimpan di Config Service
+        resp = await client.get(f"{CONFIG_URL}/config/provider_openai_api_key")
+        if resp.status_code == 200:
+            data = resp.json()
+            if data.get("data") and "provider_openai_api_key" in data["data"]:
+                defaults["openai_api_key"] = data["data"]["provider_openai_api_key"]
+
+        resp = await client.get(f"{CONFIG_URL}/config/provider_anthropic_api_key")
+        if resp.status_code == 200:
+            data = resp.json()
+            if data.get("data") and "provider_anthropic_api_key" in data["data"]:
+                defaults["anthropic_api_key"] = data["data"]["provider_anthropic_api_key"]
+
+        log.info("config_loaded_from_service", config={
+            k: v for k, v in defaults.items()
+            if k not in ("openai_api_key", "anthropic_api_key")
+        })
     except Exception as exc:
         log.warning("config_service_unreachable_using_defaults", error=str(exc))
 
@@ -169,8 +188,10 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
     # Load AI config from Config Service
     config = await _load_ai_config(state.http_client)
 
-    # Create the LLM client
+    # Create the LLM client with keys from Config Service (diset via frontend)
     llm = LLMClient(
+        openai_key=config["openai_api_key"],
+        anthropic_key=config["anthropic_api_key"],
         openai_model=config["openai_model"],
         anthropic_model=config["anthropic_model"],
         preferred_provider=config["preferred_provider"],
@@ -194,6 +215,8 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
         model_openai=config["openai_model"],
         model_anthropic=config["anthropic_model"],
         max_concurrent=config["max_concurrent_ai"],
+        openai_configured=bool(config["openai_api_key"]),
+        anthropic_configured=bool(config["anthropic_api_key"]),
     )
 
     yield  # ── Application runs here ──

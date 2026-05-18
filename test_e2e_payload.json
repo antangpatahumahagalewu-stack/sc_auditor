@@ -1,0 +1,15 @@
+{
+    "chain": "ethereum",
+    "address": "0xdead0000000000000000000000000000000005",
+    "program": "",
+    "priority": 5,
+    "metadata": {
+        "source_data": {
+            "sources": {
+                "VulnerableBank.sol": "// SPDX-License-Identifier: MIT\npragma solidity ^0.8.0;\n\ncontract VulnerableBank {\n    mapping(address => uint) public balances;\n\n    function deposit() external payable {\n        balances[msg.sender] += msg.value;\n    }\n\n    function withdraw() external {\n        uint amount = balances[msg.sender];\n        require(amount > 0);\n        (bool ok, ) = msg.sender.call{value: amount}(\"\");\n        require(ok, \"transfer failed\");\n        balances[msg.sender] = 0;\n    }\n\n    function getBalance() external view returns (uint) {\n        return address(this).balance;\n    }\n}"
+            },
+            "compiler_version": "0.8.20",
+            "provider": "manual"
+        }
+    }
+}
