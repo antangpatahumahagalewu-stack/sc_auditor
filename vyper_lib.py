@@ -12,7 +12,7 @@ from pydantic import BaseModel, Field
 
 DATA_DIR = Path("/data")
 LOG_LEVEL = os.getenv("LOG_LEVEL", "INFO")
-CONFIG_URL = os.getenv("CONFIG_URL", "http://config:8000")
+CONFIG_URL = os.getenv("CONFIG_URL", "http://01-config:8000")
 
 # ── Logging ────────────────────────────────────────────────
 

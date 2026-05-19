@@ -833,14 +833,14 @@ class WorkflowEngine:
     """
 
     SERVICES = {
-        "immunefi":    "http://immunefi:8001",
-        "source":      "http://source:8002",
-        "scanner":     "http://scanner:8003",
-        "ai":          "http://ai:8004",
-        "classifier":  "http://classifier:8005",
-        "exploit":     "http://exploit:8006",
-        "reporter":    "http://reporter:8007",
-        "notifier":    "http://notifier:8008",
+        "immunefi":    "http://02-immunefi:8001",
+        "source":      "http://03-source:8002",
+        "scanner":     "http://04-scanner:8003",
+        "ai":          "http://06-ai:8004",
+        "classifier":  "http://07-classifier:8005",
+        "exploit":     "http://08-exploit:8006",
+        "reporter":    "http://09-reporter:8007",
+        "notifier":    "http://10-notifier:8008",
     }
 
     def __init__(self, audit_id: str):

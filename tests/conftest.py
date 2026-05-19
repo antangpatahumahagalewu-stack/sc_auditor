@@ -3,7 +3,7 @@
 Service URLs default to ``localhost`` ports matching the Docker Compose
 mapping and can be overridden via environment variables, e.g.::
 
-    $env:CONFIG_URL = "http://config:8000"
+    $env:CONFIG_URL = "http://01-config:8000"
     pytest
 """
 
@@ -30,6 +30,7 @@ _SERVICE_URLS: dict[str, str] = {
     "orchestrator": "http://localhost:8009",
     "webhook": "http://localhost:8010",
     "upkeep": "http://localhost:8012",
+    "scanner_halmos": "http://localhost:8017",
 }
 
 
@@ -80,8 +81,29 @@ def source_url() -> str:
 
 @pytest.fixture()
 def scanner_url() -> str:
-    """Scanner Service URL."""
+    """Scanner Service URL (legacy monolith)."""
     return _service_url("scanner")
+
+@pytest.fixture()
+def scanner_slither_url() -> str:
+    """Scanner Slither Service URL."""
+    return _service_url("scanner_slither") or "http://04a-scanner-slither:8014"
+
+@pytest.fixture()
+def scanner_echidna_url() -> str:
+    """Scanner Echidna Service URL."""
+    return _service_url("scanner_echidna") or "http://04b-scanner-echidna:8015"
+
+@pytest.fixture()
+def scanner_forge_url() -> str:
+    """Scanner Forge Service URL."""
+    return _service_url("scanner_forge") or "http://04c-scanner-forge:8016"
+
+
+@pytest.fixture()
+def scanner_halmos_url() -> str:
+    """Scanner Halmos Service URL."""
+    return _service_url("scanner_halmos") or "http://04d-scanner-halmos:8017"
 
 
 @pytest.fixture()

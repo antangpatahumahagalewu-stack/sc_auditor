@@ -14,12 +14,12 @@
 |------|---------|-------|--------|
 | T1 | infrastructure | `docker-compose.yml`, `Dockerfile.base`, `.env.example` | Docker skeleton |
 | T2 | infrastructure | `services/*/Dockerfile` | 12 Dockerfiles |
-| T3 | Config | `services/config/app.py`, `src/manager.py`, `models.py` | Config CRUD API |
-| T4 | Config | `services/config/requirements.txt` | Dependencies |
-| T5 | Immunefi | `services/immunefi/app.py`, `src/scraper.py`, `src/sync.py` | Sync Immunefi data |
-| T6 | Immunefi | `services/immunefi/src/repo_detector.py`, `models.py` | GitHub repo detection |
-| T7 | Source | `services/source/app.py`, `src/detector.py` | Multi-source fetch skeleton |
-| T8 | Source | `services/source/src/providers/*.py` | 5 providers |
+| T3 | Config | `services/01-config/app.py`, `src/manager.py`, `models.py` | Config CRUD API |
+| T4 | Config | `services/01-config/requirements.txt` | Dependencies |
+| T5 | Immunefi | `services/02-immunefi/app.py`, `src/scraper.py`, `src/sync.py` | Sync Immunefi data |
+| T6 | Immunefi | `services/02-immunefi/src/repo_detector.py`, `models.py` | GitHub repo detection |
+| T7 | Source | `services/03-source/app.py`, `src/detector.py` | Multi-source fetch skeleton |
+| T8 | Source | `services/03-source/src/providers/*.py` | 5 providers |
 
 ### Dependency Graph
 ```

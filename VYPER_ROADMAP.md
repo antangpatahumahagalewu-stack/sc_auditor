@@ -118,10 +118,10 @@ POST /scan + tools: ["halmos"]
 
 | # | Task | Files | Output |
 |---|------|-------|--------|
-| H1 | Tambah Halmos ke scanner Dockerfile | `services/scanner/Dockerfile` | `pip install halmos` |
-| H2 | HalmosRunner module | `services/scanner/src/halmos.py` | `run()` → `list[Finding]` |
-| H3 | Integrasi ke scanner app.py | `services/scanner/app.py` | Tool "halmos" di POST /scan |
-| H4 | Parse hasil symbolic execution | `services/scanner/src/halmos.py` | Counterexample → Finding |
+| H1 | Tambah Halmos ke scanner Dockerfile | `services/04-scanner/Dockerfile` | `pip install halmos` |
+| H2 | HalmosRunner module | `services/04-scanner/src/halmos.py` | `run()` → `list[Finding]` |
+| H3 | Integrasi ke scanner app.py | `services/04-scanner/app.py` | Tool "halmos" di POST /scan |
+| H4 | Parse hasil symbolic execution | `services/04-scanner/src/halmos.py` | Counterexample → Finding |
 | H5 | Integration test | `tests/test_halmos.py` | Found invariant violation |
 | H6 | Dokumentasi | — | Halmos usage guide |
 
@@ -199,11 +199,11 @@ POST /scan + detectors: ["my_custom_detector.py"]
 
 | # | Task | Files | Output |
 |---|------|-------|--------|
-| D1 | Detector loader system | `services/scanner/src/detector_loader.py` | Load `.py` detectors dynamically |
-| D2 | Detector registry API | `services/scanner/app.py` | `GET /detectors`, `POST /detectors` |
-| D3 | Example detectors | `services/scanner/detectors/reentrancy_detailed.py` | 3 example detectors |
-| D4 | Validation & sandboxing | `services/scanner/src/detector_loader.py` | Safe exec, timeout |
-| D5 | Integration with scanner | `services/scanner/src/slither.py` | Pass custom detectors |
+| D1 | Detector loader system | `services/04-scanner/src/detector_loader.py` | Load `.py` detectors dynamically |
+| D2 | Detector registry API | `services/04-scanner/app.py` | `GET /detectors`, `POST /detectors` |
+| D3 | Example detectors | `services/04-scanner/detectors/reentrancy_detailed.py` | 3 example detectors |
+| D4 | Validation & sandboxing | `services/04-scanner/src/detector_loader.py` | Safe exec, timeout |
+| D5 | Integration with scanner | `services/04-scanner/src/slither.py` | Pass custom detectors |
 | D6 | Documentation | — | How to write detectors |
 
 ### Dependencies

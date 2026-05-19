@@ -14,10 +14,10 @@ x-service-base: &service-base
       max-file: "3"
 
 services:
-  config:
+  01-config:
     <<: *service-base
     build:
-      context: services/config
+      context: services/01-config
       dockerfile: Dockerfile
     ports: ["8011:8000"]
     volumes: [vyper_config:/data/config]
@@ -27,80 +27,133 @@ services:
       timeout: 3s
       retries: 3
 
-  immunefi:
+  02-immunefi:
     <<: *service-base
     build:
-      context: services/immunefi
+      context: services/02-immunefi
       dockerfile: Dockerfile
     ports: ["8001:8000"]
     volumes: [vyper_immunefi:/data/immunefi]
-    depends_on: [config]
+    depends_on: [01-config]
     environment:
-      - CONFIG_URL=http://config:8000
+      - CONFIG_URL=http://01-config:8000
 
-  source:
+  03-source:
     <<: *service-base
     build:
-      context: services/source
+      context: services/03-source
       dockerfile: Dockerfile
     ports: ["8002:8000"]
     volumes: [vyper_source:/data/source]
-    depends_on: [config]
+    depends_on: [01-config]
     environment:
-      - CONFIG_URL=http://config:8000
+      - CONFIG_URL=http://01-config:8000
 
-  scanner:
+  04-scanner:
     <<: *service-base
     build:
-      context: services/scanner
+      context: services/04-scanner
       dockerfile: Dockerfile
     ports: ["8003:8000"]
     volumes: [vyper_scanner:/data/scanner]
-    depends_on: [config]
+    depends_on: [01-config]
     environment:
-      - CONFIG_URL=http://config:8000
-      - MYTHRIL_URL=http://scanner-mythril:8013
+      - CONFIG_URL=http://01-config:8000
+      - MYTHRIL_URL=http://05-scanner-mythril:8013
 
-  scanner-mythril:
+   # ── Scanner Services (split from 04-scanner) ──────────────────
+   # Each scanner runs as an independent microservice for fault isolation,
+   # independent scaling, and smaller Docker images.
+   #
+   # 04a = Slither (static analysis)
+   # 04b = Echidna (fuzzing)
+   # 04c = Forge   (build verification)
+   # 05  = Mythril (symbolic execution) — already existed
+
+  04a-scanner-slither:
     <<: *service-base
     build:
-      context: services/scanner-mythril
+      context: .
+      dockerfile: services/04a-scanner-slither/Dockerfile
+    ports: ["8014:8014"]
+    volumes: [vyper_scanner_slither:/data/scanner-slither]
+    depends_on: [01-config]
+    environment:
+      - CONFIG_URL=http://01-config:8000
+
+  04b-scanner-echidna:
+    <<: *service-base
+    build:
+      context: .
+      dockerfile: services/04b-scanner-echidna/Dockerfile
+    ports: ["8015:8015"]
+    volumes: [vyper_scanner_echidna:/data/scanner-echidna]
+    depends_on: [01-config]
+    environment:
+      - CONFIG_URL=http://01-config:8000
+
+  04c-scanner-forge:
+    <<: *service-base
+    build:
+      context: .
+      dockerfile: services/04c-scanner-forge/Dockerfile
+    ports: ["8016:8016"]
+    volumes: [vyper_scanner_forge:/data/scanner-forge]
+    depends_on: [01-config]
+    environment:
+      - CONFIG_URL=http://01-config:8000
+
+  04d-scanner-halmos:
+    <<: *service-base
+    build:
+      context: .
+      dockerfile: services/04d-scanner-halmos/Dockerfile
+    ports: ["8017:8017"]
+    volumes: [vyper_scanner_halmos:/data/scanner-halmos]
+    depends_on: [01-config]
+    environment:
+      - CONFIG_URL=http://01-config:8000
+
+   05-scanner-mythril:
+    <<: *service-base
+    build:
+      context: services/05-scanner-mythril
       dockerfile: Dockerfile
     ports: ["8013:8013"]
     volumes: [vyper_scanner_mythril:/data/scanner-mythril]
-    depends_on: [config]
+    depends_on: [01-config]
     environment:
-      - CONFIG_URL=http://config:8000
+      - CONFIG_URL=http://01-config:8000
 
-  ai:
+  06-ai:
     <<: *service-base
     build:
-      context: services/ai
+      context: services/06-ai
       dockerfile: Dockerfile
     ports: ["8004:8000"]
     volumes: [vyper_ai:/data/ai]
-    depends_on: [config]
+    depends_on: [01-config]
     environment:
       # API keys (OPENAI_API_KEY, ANTHROPIC_API_KEY) diset via frontend Settings → Config Service
-      - CONFIG_URL=http://config:8000
+      - CONFIG_URL=http://01-config:8000
 
-  classifier:
+  07-classifier:
     <<: *service-base
     build:
-      context: services/classifier
+      context: services/07-classifier
       dockerfile: Dockerfile
     ports: ["8005:8000"]
     volumes:
       - vyper_classifier:/data/classifier
       - vyper_learning:/data/learning
-    depends_on: [config]
+    depends_on: [01-config]
     environment:
-      - CONFIG_URL=http://config:8000
+      - CONFIG_URL=http://01-config:8000
 
-  exploit:
+  08-exploit:
     <<: *service-base
     build:
-      context: services/exploit
+      context: services/08-exploit
       dockerfile: Dockerfile
     ports: ["8006:8006"]
     volumes:
@@ -109,9 +162,9 @@ services:
       # ephemeral Anvil containers. The Docker socket MUST be mounted
       # read-write so the SDK can perform container lifecycle operations.
       - /var/run/docker.sock:/var/run/docker.sock
-    depends_on: [config]
+    depends_on: [01-config]
     environment:
-      - CONFIG_URL=http://config:8000
+      - CONFIG_URL=http://01-config:8000
     privileged: false
     # Run exploit container as root so it can access the mounted Docker
     # socket at /var/run/docker.sock (needed by docker-py to create Anvil
@@ -120,117 +173,131 @@ services:
     # secure approach (matching host docker group id via group_add).
     user: "root"
 
-  reporter:
+  09-reporter:
     <<: *service-base
     build:
-      context: services/reporter
+      context: services/09-reporter
       dockerfile: Dockerfile
     ports: ["8007:8007"]
     volumes: [vyper_reporter:/data/reporter]
-    depends_on: [config]
+    depends_on: [01-config]
     environment:
-      - CONFIG_URL=http://config:8000
+      - CONFIG_URL=http://01-config:8000
 
-  notifier:
+  10-notifier:
     <<: *service-base
     build:
-      context: services/notifier
+      context: services/10-notifier
       dockerfile: Dockerfile
     ports: ["8008:8000"]
     volumes: [vyper_notifier:/data/notifier]
-    depends_on: [config]
+    depends_on: [01-config]
     environment:
-      - CONFIG_URL=http://config:8000
+      - CONFIG_URL=http://01-config:8000
 
-  orchestrator:
+   11-orchestrator:
+      <<: *service-base
+      build:
+        context: services/11-orchestrator
+        dockerfile: Dockerfile
+      ports: ["8009:8000"]
+      volumes:
+        - vyper_orchestrator:/data/orchestrator
+        - vyper_learning:/data/learning
+      depends_on:
+        - 02-immunefi
+        - 03-source
+        - 04a-scanner-slither
+        - 04b-scanner-echidna
+      - 04c-scanner-forge
+      - 04d-scanner-halmos
+      - 04-scanner
+      - 05-scanner-mythril
+        - 06-ai
+        - 07-classifier
+        - 08-exploit
+        - 09-reporter
+        - 10-notifier
+        - 01-config
+      environment:
+        - CONFIG_URL=http://01-config:8000
+        # Scanner URLs (defaults in config.py already point to correct services)
+        # These can be overridden via env if needed
+
+  12-webhook:
     <<: *service-base
     build:
-      context: services/orchestrator
-      dockerfile: Dockerfile
-    ports: ["8009:8000"]
-    volumes:
-      - vyper_orchestrator:/data/orchestrator
-      - vyper_learning:/data/learning
-    depends_on:
-      - immunefi
-      - source
-      - scanner
-      - ai
-      - classifier
-      - exploit
-      - reporter
-      - notifier
-      - config
-    environment:
-      - CONFIG_URL=http://config:8000
-
-  webhook:
-    <<: *service-base
-    build:
-      context: services/webhook
+      context: services/12-webhook
       dockerfile: Dockerfile
     ports: ["8010:8000"]
     volumes: [vyper_webhook:/data/webhook]
-    depends_on: [config]
+    depends_on: [01-config]
     environment:
-      - CONFIG_URL=http://config:8000
+      - CONFIG_URL=http://01-config:8000
 
-  upkeep:
+  13-upkeep:
     <<: *service-base
     build:
-      context: services/upkeep
+      context: services/13-upkeep
       dockerfile: Dockerfile
     ports: ["8012:8000"]
     volumes: [vyper_upkeep:/data/upkeep]
-    depends_on: [config]
+    depends_on: [01-config]
     environment:
-      - CONFIG_URL=http://config:8000
+      - CONFIG_URL=http://01-config:8000
 
-  agent:
+  14-agent:
     <<: *service-base
     build:
-      context: services/agent
+      context: services/14-agent
       dockerfile: Dockerfile
     ports: ["8014:8000"]
     volumes: [vyper_agent:/data/agent]
     depends_on:
-      - config
-      - immunefi
-      - source
-      - scanner
-      - ai
-      - classifier
-      - exploit
-      - reporter
-      - notifier
+      - 01-config
+      - 02-immunefi
+      - 03-source
+      - 04-scanner
+      - 06-ai
+      - 07-classifier
+      - 08-exploit
+      - 09-reporter
+      - 10-notifier
     environment:
-      - CONFIG_URL=http://config:8000
+      - CONFIG_URL=http://01-config:8000
 
-  dashboard:
+  15-dashboard:
     <<: *service-base
     build:
-      context: services/dashboard
+      context: services/15-dashboard
       dockerfile: Dockerfile
     ports: ["8000:8000"]
     volumes:
       - vyper_dashboard:/data/dashboard
       - vyper_learning:/data/learning
-    depends_on: [orchestrator, config]
+    depends_on: [11-orchestrator, 01-config]
     environment:
-      - CONFIG_URL=http://config:8000
-      - ORCHESTRATOR_URL=http://orchestrator:8000
-      - SCANNER_URL=http://scanner:8000
-      - CLASSIFIER_URL=http://classifier:8000
-      - IMMUNEFI_URL=http://immunefi:8000
-      - SOURCE_URL=http://source:8000
-      - REPORTER_URL=http://reporter:8000
-      - NOTIFIER_URL=http://notifier:8000
-      - EXPLOIT_URL=http://exploit:8006
-      - AGENT_URL=http://agent:8014
+      - CONFIG_URL=http://01-config:8000
+      - ORCHESTRATOR_URL=http://11-orchestrator:8000
+       - SCANNER_URL=http://04-scanner:8000
+       - SCANNER_SLITHER_URL=http://04a-scanner-slither:8014
+       - SCANNER_ECHIDNA_URL=http://04b-scanner-echidna:8015
+       - SCANNER_FORGE_URL=http://04c-scanner-forge:8016
+      - CLASSIFIER_URL=http://07-classifier:8000
+      - IMMUNEFI_URL=http://02-immunefi:8000
+      - SOURCE_URL=http://03-source:8000
+      - REPORTER_URL=http://09-reporter:8000
+      - NOTIFIER_URL=http://10-notifier:8000
+      - EXPLOIT_URL=http://08-exploit:8006
+      - AGENT_URL=http://14-agent:8014
 
 volumes:
   vyper_agent:
   vyper_config:
+  vyper_scanner_slither:
+  vyper_scanner_echidna:
+  vyper_scanner_forge:
+  vyper_scanner_halmos:
   vyper_immunefi:
   vyper_source:
   vyper_scanner:

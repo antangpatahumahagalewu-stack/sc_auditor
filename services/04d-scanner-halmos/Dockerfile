@@ -1,0 +1,32 @@
+FROM python:3.12-slim
+
+LABEL service="scanner-halmos"
+LABEL version="0.1.0"
+
+# Install system dependencies
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    curl \
+    git \
+    build-essential \
+    && rm -rf /var/lib/apt/lists/*
+
+# Install Foundry
+RUN curl -fsSL https://foundry.paradigm.xyz | bash
+ENV PATH="/root/.foundry/bin:${PATH}"
+RUN foundryup
+
+# Install Halmos
+RUN pip install --no-cache-dir halmos
+
+# Create service directory
+WORKDIR /app
+
+# Copy service code
+COPY requirements.txt .
+RUN pip install --no-cache-dir -r requirements.txt
+
+COPY . .
+
+EXPOSE 8017
+
+CMD ["uvicorn", "app:app", "--host", "0.0.0.0", "--port", "8017"]

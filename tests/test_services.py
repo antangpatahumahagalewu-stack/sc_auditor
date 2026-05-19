@@ -107,8 +107,36 @@ class TestHealthEndpoints:
     async def test_scanner_health(
         self, async_client: httpx.AsyncClient, scanner_url: str
     ) -> None:
-        """Scanner Service — Type B wrapped."""
+        """Scanner Service (legacy monolith) — Type B wrapped."""
         await _check_health(async_client, scanner_url, "scanner")
+
+    @pytest.mark.asyncio
+    async def test_scanner_slither_health(
+        self, async_client: httpx.AsyncClient, scanner_slither_url: str
+    ) -> None:
+        """Scanner Slither Service."""
+        await _check_health(async_client, scanner_slither_url, "scanner-slither")
+
+    @pytest.mark.asyncio
+    async def test_scanner_echidna_health(
+        self, async_client: httpx.AsyncClient, scanner_echidna_url: str
+    ) -> None:
+        """Scanner Echidna Service."""
+        await _check_health(async_client, scanner_echidna_url, "scanner-echidna")
+
+    @pytest.mark.asyncio
+    async def test_scanner_forge_health(
+        self, async_client: httpx.AsyncClient, scanner_forge_url: str
+    ) -> None:
+        """Scanner Forge Service."""
+        await _check_health(async_client, scanner_forge_url, "scanner-forge")
+
+    @pytest.mark.asyncio
+    async def test_scanner_halmos_health(
+        self, async_client: httpx.AsyncClient, scanner_halmos_url: str
+    ) -> None:
+        """Scanner Halmos Service."""
+        await _check_health(async_client, scanner_halmos_url, "scanner-halmos")
 
     @pytest.mark.asyncio
     async def test_ai_health(
