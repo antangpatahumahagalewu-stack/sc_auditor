@@ -38,7 +38,7 @@ _SERVICE_URLS: dict[str, str] = {
     "orchestrator": "http://localhost:8009",
     "webhook": "http://localhost:8010",
     "upkeep": "http://localhost:8012",
-    "agent": "http://localhost:8014",  # Note: 14-agent uses port 8014
+    "agent": "http://localhost:8019",  # Fix: 14-agent now uses port 8019 (was 8014, conflict with scanner_slither)
     "dashboard": "http://localhost:8000",
     "submission": "http://localhost:8018",
 }

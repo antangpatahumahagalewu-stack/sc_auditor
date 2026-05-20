@@ -32,6 +32,7 @@ from cli.commands.config_cmd import config_cmd
 from cli.commands.dashboard import dashboard
 from cli.commands.docker import down, logs, ps, restart, up
 from cli.commands.exploit import exploit
+from cli.commands.backup import backup_app
 from cli.commands.scan import scan
 from cli.commands.status import daemon, health, list_audits, queue, stats, status
 
@@ -75,6 +76,9 @@ app.command("daemon")(daemon)
 app.command("dashboard")(dashboard)
 app.command("config")(config_cmd)
 
+# ── Backup subcommands ───────────────────────────────────────────
+
+app.add_typer(backup_app)
 
 # ── Version command ──────────────────────────────────────────────
 

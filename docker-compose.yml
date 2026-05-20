@@ -12,6 +12,14 @@ x-service-base: &service-base
     options:
       max-size: "10m"
       max-file: "3"
+  deploy:
+    resources:
+      limits:
+        cpus: "0.5"
+        memory: "512M"
+      reservations:
+        cpus: "0.1"
+        memory: "128M"
 
 services:
   01-config:
@@ -251,7 +259,7 @@ services:
     build:
       context: services/14-agent
       dockerfile: Dockerfile
-    ports: ["8014:8000"]
+    ports: ["8019:8000"]
     volumes: [vyper_agent:/data/agent]
     depends_on:
       - 01-config
@@ -289,7 +297,7 @@ services:
       - REPORTER_URL=http://09-reporter:8000
       - NOTIFIER_URL=http://10-notifier:8000
       - EXPLOIT_URL=http://08-exploit:8006
-      - AGENT_URL=http://14-agent:8014
+      - AGENT_URL=http://14-agent:8019
 
   16-submission:
     <<: *service-base
