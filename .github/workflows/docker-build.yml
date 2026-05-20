@@ -1,0 +1,71 @@
+name: Docker Build
+
+on:
+  push:
+    branches: [main]
+    tags: ['v*']
+  pull_request:
+    branches: [main]
+
+jobs:
+  build:
+    name: Build Docker Images
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        service:
+          - 01-config
+          - 02-immunefi
+          - 03-source
+          - 04-scanner
+          - 06-ai
+          - 07-classifier
+          - 08-exploit
+          - 09-reporter
+          - 10-notifier
+          - 11-orchestrator
+          - 12-webhook
+          - 13-upkeep
+          - 14-agent
+          - 15-dashboard
+          - 16-submission
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Cache Docker layers
+        uses: actions/cache@v4
+        with:
+          path: /tmp/.buildx-cache
+          key: ${{ runner.os }}-buildx-${{ matrix.service }}-${{ github.sha }}
+          restore-keys: |
+            ${{ runner.os }}-buildx-${{ matrix.service }}
+
+      - name: Build ${{ matrix.service }}
+        uses: docker/build-push-action@v6
+        with:
+          context: services/${{ matrix.service }}
+          file: services/${{ matrix.service }}/Dockerfile
+          load: true
+          tags: vyper/${{ matrix.service }}:latest
+          cache-from: type=local,src=/tmp/.buildx-cache
+          cache-to: type=local,dest=/tmp/.buildx-cache-new,mode=max
+
+      # Scanner services with root-level context
+      - name: Build scanner services
+        if: startsWith(matrix.service, '04') || matrix.service == '05-scanner-mythril'
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: services/${{ matrix.service }}/Dockerfile
+          load: true
+          tags: vyper/${{ matrix.service }}:latest
+
+      - name: Move cache
+        run: |
+          rm -rf /tmp/.buildx-cache
+          mv /tmp/.buildx-cache-new /tmp/.buildx-cache

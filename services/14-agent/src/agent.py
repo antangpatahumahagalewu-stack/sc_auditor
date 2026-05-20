@@ -5,6 +5,11 @@ Implements the Reasoning + Acting (ReAct) pattern:
 2. ACT: Agent calls a skill with parameters
 3. OBSERVE: Agent processes the skill result
 4. REPEAT until task is complete
+
+Memory integration:
+- VectorStore: Search past sessions for similar patterns
+- EpisodicStore: Record every step chronologically
+- GraphMemory: Track relationships between contracts, vulns, exploits
 """
 
 from __future__ import annotations
@@ -39,7 +44,7 @@ class AgentLoop:
     Attributes:
         registry: Skill registry with all available skills
         llm: LLM client for reasoning
-        memory: Agent memory system
+        memory: Agent memory system (working + vector + episodic + graph)
         http_client: HTTP client for service calls
     """
 
@@ -102,6 +107,48 @@ class AgentLoop:
         self.memory.set_working("analyzed_findings", [])
         self.memory.set_working("reports", [])
 
+        # Vector store: cari pengalaman serupa dari session sebelumnya
+        try:
+            similar_past = await self.memory.vector.search(
+                f"{task_type.value}: {goal[:100]}",
+                limit=3,
+            )
+            if similar_past:
+                self.memory.set_working(
+                    "similar_past_sessions", similar_past
+                )
+                log.info(
+                    "found_similar_past",
+                    count=len(similar_past),
+                )
+        except Exception:
+            pass  # non-blocking
+
+        # Graph memory: catat session node
+        try:
+            session_node_id = await self.memory.graph.add_node(
+                label=f"Session {session_id}: {goal[:50]}",
+                node_type="session",
+                properties={
+                    "session_id": session_id,
+                    "task_type": task_type.value,
+                    "goal": goal[:200],
+                },
+            )
+            self.memory.set_working("_graph_session_node", session_node_id)
+        except Exception:
+            pass
+
+        # Episodic store: record session start
+        try:
+            await self.memory.episodic_store.store(
+                "session_started",
+                {"session_id": session_id, "task_type": task_type.value, "goal": goal[:200]},
+                metadata={"session_id": session_id, "event": "start"},
+            )
+        except Exception:
+            pass
+
         # ReAct loop
         for step_num in range(1, max_steps + 1):
             session.status = AgentState.THINKING
@@ -147,6 +194,48 @@ class AgentLoop:
                     "session_completed",
                     {"steps": step_num, "output": session.output_data},
                 )
+
+                # Vector store: simpan session summary
+                try:
+                    summary_text = (
+                        f"Session {session_id}: {goal[:100]} | "
+                        f"Findings: {len(session.output_data.get('findings', []))} | "
+                        f"Steps: {step_num}"
+                    )
+                    await self.memory.vector.store(
+                        f"session_{session_id}",
+                        summary_text,
+                        metadata={
+                            "session_id": session_id,
+                            "task_type": task_type.value,
+                            "steps": step_num,
+                            "success": True,
+                        },
+                    )
+                except Exception:
+                    pass
+
+                # Graph memory: link session → findings
+                try:
+                    for finding in session.output_data.get("findings", [])[:5]:
+                        finding_label = (
+                            finding.get("title") or finding.get("name", "unknown")
+                        )[:100]
+                        finding_node_id = await self.memory.graph.add_node(
+                            label=f"Finding: {finding_label}",
+                            node_type="finding",
+                            properties=finding,
+                        )
+                        graph_node = self.memory.get_working("_graph_session_node")
+                        if graph_node:
+                            await self.memory.graph.add_edge(
+                                source_id=graph_node,
+                                target_id=finding_node_id,
+                                relation="found",
+                                weight=1.0,
+                            )
+                except Exception:
+                    pass
 
                 # Reflection (async — tidak blocking)
                 try:
@@ -202,6 +291,26 @@ class AgentLoop:
                     "summary": observation[:300],
                 },
             )
+
+            # Episodic store: record each step
+            try:
+                await self.memory.episodic_store.store(
+                    f"step_{step_num}_{action_name}",
+                    {
+                        "thought": thought[:200],
+                        "action": action_name,
+                        "success": result.success,
+                        "duration_ms": step.duration_ms,
+                    },
+                    metadata={
+                        "session_id": session_id,
+                        "step": step_num,
+                        "skill": action_name,
+                        "success": result.success,
+                    },
+                )
+            except Exception:
+                pass
 
             # Update working memory dengan findings jika ada
             if result.success and isinstance(result.output, dict):
@@ -265,7 +374,6 @@ class AgentLoop:
             return output
 
         if isinstance(output, dict):
-            # Buat ringkasan yang informatif
             parts = []
             for key, value in output.items():
                 if key.startswith("_"):
@@ -273,7 +381,6 @@ class AgentLoop:
                 if isinstance(value, list):
                     parts.append(f"{key}: {len(value)} item(s)")
                     if value and isinstance(value[0], dict):
-                        # Show first item summary
                         first = value[0]
                         summary = ", ".join(
                             f"{k}={v}" for k, v in list(first.items())[:4]

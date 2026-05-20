@@ -110,7 +110,11 @@ class ServiceProxy:
         """Create the shared HTTP client (call at app startup)."""
         self._client = httpx.AsyncClient(
             timeout=httpx.Timeout(self._timeout),
-            headers={"User-Agent": "Vyper-Dashboard/1.0"},
+            headers={
+                "User-Agent": "Vyper-Dashboard/1.0",
+                "X-API-Key": os.environ.get("DASHBOARD_API_KEY", "dev-mode-no-key"),
+                "X-Service-Name": "15-dashboard",
+            },
         )
         logger.info("HTTP client created")
 

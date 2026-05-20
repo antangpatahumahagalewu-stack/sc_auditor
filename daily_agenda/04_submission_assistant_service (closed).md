@@ -229,108 +229,38 @@ Kenapa terpisah dari Service 02:
    └─────────┘   └──────────┘   └──────────┘
 ```
 
-### Database Schema
+### Storage Schema (Enhanced JSON)
 
-```sql
--- Enum: kategori bug yang didukung pipeline
-CREATE TYPE bug_category AS ENUM (
-    'reentrancy', 'oracle_manipulation', 'flash_loan', 'mev',
-    'access_control', 'overflow', 'precision_loss', 'bridge',
-    'zero_day', 'governance', 'signature_replay', 'storage_collision',
-    'donation', 'other'
-);
+> Sesuai VYPER.md §3a — 100% JSON file-based, zero SQL.
 
--- Submissions (untuk semua kategori bug)
-CREATE TABLE submissions (
-    id                      UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-    program_slug            TEXT NOT NULL,
-    finding_id              TEXT NOT NULL,
-    
-    -- Kategori bug — penting untuk routing strategi argumentasi
-    bug_category            bug_category NOT NULL DEFAULT 'other',
-    
-    -- Initial submission data
-    title                   TEXT NOT NULL,
-    description             TEXT NOT NULL,
-    severity                TEXT NOT NULL,  -- critical/high/medium/low
-    poc_solidity            TEXT,
-    tx_hash                 TEXT,
-    exploit_sequence        JSONB DEFAULT '[]',
-    
-    -- Evidence spesifik per kategori (disimpan sebagai JSON)
-    category_evidence       JSONB DEFAULT '{}',
-    -- Contoh per kategori:
-    -- reentrancy:      {"call_graph": [...], "state_diff": {...}, "call_depth": 3}
-    -- oracle:         {"manipulation_cost": 120000, "profit": 2400000, "twap_window": 5}
-    -- overflow:       {"exact_values": [...], "trigger_condition": "..."}
-    -- zero_day:       {"novelty_arguments": [...], "prior_art_search": "none"}
-    -- mev:            {"mev_score": 0.87, "sandwich_profit": 500000}
-    -- lihat dataclass Submission.category_specific_evidence untuk detail
-    
-    -- Immunefi tracking
-    immunefi_submission_id  TEXT,
-    status                  TEXT DEFAULT 'draft',
-    -- draft / submitted / in_review / accepted / rejected / paid
-    
-    -- Metadata
-    created_at              TIMESTAMPTZ DEFAULT NOW(),
-    updated_at              TIMESTAMPTZ DEFAULT NOW(),
-    submitted_at            TIMESTAMPTZ,
-    
-    UNIQUE(finding_id)
-);
-
--- Messages (communication thread)
-CREATE TABLE messages (
-    id                      UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-    submission_id           UUID REFERENCES submissions(id) ON DELETE CASCADE,
-    role                    TEXT NOT NULL,  -- 'us' atau 'immunefi'
-    content                 TEXT NOT NULL,
-    
-    -- Analysis
-    intent                  TEXT,           -- request_evidence / severity_dispute / etc
-    intent_context          JSONB DEFAULT '{}',  -- {bug_category, severity, confidence}
-    suggested_reply         TEXT,
-    reply_used              BOOLEAN DEFAULT FALSE,
-    
-    -- Attachments
-    attachments             JSONB DEFAULT '[]',
-    
-    created_at              TIMESTAMPTZ DEFAULT NOW()
-);
-
--- Evidence cache (data pendukung dari pipeline — category-aware)
-CREATE TABLE evidence_cache (
-    id                      UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-    submission_id           UUID REFERENCES submissions(id) ON DELETE CASCADE,
-    evidence_type           TEXT NOT NULL,
-    -- scan_result / exploit_output / math_parameters / source_code / etc
-    bug_category            bug_category,   -- untuk routing query
-    data                    JSONB NOT NULL,
-    source_service          TEXT NOT NULL,  -- 03 / 04a / 08 / etc
-    created_at              TIMESTAMPTZ DEFAULT NOW()
-);
-
--- Index: cari evidence per kategori
-CREATE INDEX idx_evidence_category ON evidence_cache(submission_id, bug_category);
-
--- Attachments (file storage)
-CREATE TABLE attachments (
-    id                      UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-    submission_id           UUID REFERENCES submissions(id) ON DELETE CASCADE,
-    message_id              UUID REFERENCES messages(id) ON DELETE CASCADE,
-    filename                TEXT NOT NULL,
-    file_type               TEXT,  -- sol / json / txt / png
-    file_size               INT,
-    storage_path            TEXT NOT NULL,
-    created_at              TIMESTAMPTZ DEFAULT NOW()
-);
-
--- Index: cari submission per kategori
-CREATE INDEX idx_submissions_category ON submissions(bug_category);
-
--- Index: cari submission per status + kategori
-CREATE INDEX idx_submissions_status_category ON submissions(status, bug_category);
+```json
+/data/submission/
+├── submissions/{finding_id}.json        # Per-submission (atomic write)
+│       {
+│           "id": "uuid",
+│           "program_slug": "...",
+│           "finding_id": "...",
+│           "bug_category": "reentrancy",
+│           "title": "...",
+│           "description": "...",
+│           "severity": "critical|high|medium|low",
+│           "poc_solidity": "...",
+│           "tx_hash": "...",
+│           "exploit_sequence": [...],
+│           "category_evidence": {...},
+│           "status": "draft",
+│           "created_at": "...",
+│           "updated_at": "..."
+│       }
+├── messages/{submission_id}/{msg_id}.json  # Per-message
+├── evidence/{submission_id}/{evidence_type}.json  # Per-evidence cache
+├── attachments/{submission_id}/{file_name}        # File attachments
+├── indexes/
+│   ├── by_category.json        # bug_category → [finding_id, ...]
+│   ├── by_status.json          # status → [finding_id, ...]
+│   ├── by_program.json         # program_slug → [finding_id, ...]
+│   └── by_recent.json          # [finding_id, ...] (sorted by created_at)
+└── _meta.json                  # Schema version, stats
 ```
 
 ---

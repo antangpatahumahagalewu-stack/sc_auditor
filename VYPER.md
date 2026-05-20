@@ -2,7 +2,7 @@
 
 > **Arsitektur Final**: Microservice, Docker Compose, HTTP/REST, Python FastAPI
 > **Target**: Personal Use — Scan Immunefi Contracts, Find TP Bugs, Generate Reports
-> **Tanggal**: 17 Mei 2026
+> **Tanggal**: 20 Mei 2026
 
 ---
 
@@ -14,7 +14,7 @@
 ┌──────────────────────────────────────────────────────────────┐
 │                        VYPER                                  │
 │                                                              │
-│  12 microservices, 1 laptop.                                 │
+│  20 microservices, 1 laptop.                                 │
 │                                                              │
 │  docker compose up                                          │
 │    ↓                                                         │
@@ -48,7 +48,7 @@
 
 ---
 
-## 2. Tech Stack — 12 Service, 1 Stack
+## 2. Tech Stack — 20 Service, 1 Stack
 
 Semua service dalam **satu bahasa, satu framework, satu pola**.
 
@@ -56,9 +56,10 @@ Semua service dalam **satu bahasa, satu framework, satu pola**.
 
 | Service | Framework | HTTP Client | Storage | Eksternal |
 |---------|-----------|-------------|---------|-----------|
+| **Dashboard** | FastAPI + React SPA | httpx | JSON file | Semua service (proxy) |
 | **Immunefi** | FastAPI | httpx | JSON file | GitHub API |
 | **Source** | FastAPI | httpx | JSON file + git | Etherscan API, Sourcify, GitHub |
-| **Scanner** | FastAPI | subprocess | JSON file | Slither, Mythril, Echidna, solc |
+| **Scanner Router** | FastAPI | subprocess + httpx | JSON file | 5 scanner tools (internal) |
 | **AI** | FastAPI | httpx | JSON cache | OpenAI / Anthropic API |
 | **Classifier** | FastAPI | — | JSON file | — |
 | **Exploit** | FastAPI | Docker SDK | JSON file | Anvil (Foundry) |
@@ -68,19 +69,26 @@ Semua service dalam **satu bahasa, satu framework, satu pola**.
 | **Webhook** | FastAPI | httpx | Log file | Slack, PagerDuty, etc |
 | **Config** | FastAPI | — | JSON file | — |
 | **Upkeep** | FastAPI | httpx + subprocess | JSON file | pip, GitHub |
+| **Scanner Mythril** | FastAPI | subprocess | JSON file | Mythril (isolated sidecar) |
+| **Scanner Slither** | FastAPI | subprocess | JSON file | Slither |
+| **Scanner Echidna** | FastAPI | subprocess | JSON file | Echidna binary |
+| **Scanner Forge** | FastAPI | subprocess | JSON file | Foundry (forge) |
+| **Scanner Halmos** | FastAPI | subprocess | JSON file | Halmos (formal verif) |
+| **Agent** | FastAPI | httpx | JSON file | LLM, orchestrator |
+| **Submission** | FastAPI | httpx | JSON file | Immunefi, bounty platforms |
 
 ### Stack Foundation
 
 ```
-Bahasa:         Python 3.11+ (semua service)
-Framework:      FastAPI (semua service)
+Bahasa:         Python 3.11+ (19 services) + TypeScript (Dashboard React SPA)
+Framework:      FastAPI (19 services) + React 18 (Dashboard)
 HTTP Client:    httpx (async, standard)
-Run:            uvicorn (tiap service)
-Container:      python:3.11-slim (base image)
+Run:            uvicorn (tiap service) + Vite (Dashboard)
+Container:      python:3.11-slim (base image) + node:20 (Dashboard build)
 Orkestrasi:     Docker Compose
 Storage:        Docker volumes (JSON + Markdown)
 
-Dashboard FE:   FastAPI Jinja2 templates + Tailwind CDN (v3)
+Dashboard FE:   React 18 SPA + TypeScript + Tailwind v4 + Vite
 AI Provider:    OpenAI GPT-4 / Anthropic Claude (optional)
 Blockchain:     Slither, Mythril, Echidna, Foundry (Anvil)
 Compiler:       solc-select (otomatis install versi)
@@ -105,7 +113,7 @@ Tidak perlu ganti bahasa. Semua tools bisa dipanggil via subprocess atau HTTP.
 | Variabel | Value |
 |----------|-------|
 | `PYTHON_VERSION` | `3.11-slim` |
-| `FASTAPI_PORT` | `8000`-`8012` |
+| `FASTAPI_PORT` | `8000`-`8018` |
 | `DOCKER_COMPOSE` | `3.9` |
 | `STORAGE` | Docker volumes + JSON |
 | `LOG_FORMAT` | JSON (semua service) |
@@ -119,7 +127,7 @@ Tidak perlu ganti bahasa. Semua tools bisa dipanggil via subprocess atau HTTP.
 | Anvil (Docker) | ✅ docker-py | ✅ Dockerode |
 | **Winner** | **✅ Langsung kerja** | Perlu bridging |
 
-**Keputusan**: **Python 3.11+**. Hermes sudah Python, tools audit sudah Python. Satu bahasa = langsung jalan.
+**Keputusan**: **Python 3.11+** (19 services). Dashboard pakai **TypeScript + React** untuk SPA modern. Hermes sudah Python, tools audit sudah Python — satu bahasa utama = langsung jalan.
 
 ---
 
@@ -308,24 +316,24 @@ Learning     JSON          false_negatives.json
 
 ## 3a. Why JSON, Not SQL
 
-**VYPER tidak menggunakan SQL database apapun.** Tidak ada PostgreSQL, SQLite, MySQL, atau varian lainnya. Semua data adalah JSON files.
+**VYPER adalah 100% JSON file-based.** Tidak menggunakan database engine apapun. Semua data adalah JSON files.
 
 Ini adalah **keputusan arsitektur yang disengaja**, bukan tradeoff.
 
-### Perbandingan: JSON vs SQL untuk Use Case Ini
+### Kenapa JSON, Bukan Database
 
-| Faktor | SQL (PostgreSQL/SQLite) | JSON Files |
-|--------|------------------------|------------|
+| Faktor | Database Engine | JSON Files |
+|--------|----------------|------------|
 | **Setup** | Install, config, migrations, pooling | `mkdir -p ~/.vyper/` — selesai |
 | **Startup** | 5-30 detik (container spin up) | 0 (file langsung dibaca) |
-| **Memory** | ~200MB untuk PostgreSQL saja | Beberapa KB (isi file) |
-| **Backup** | `pg_dump \| gzip > backup.sql.gz` | `cp -r ~/.vyper/ backup/` |
-| **Restore** | Drop DB, create, pg_restore — 5-15 menit | `cp -r backup/ ~/.vyper/` — detik |
-| **Portabilitas** | Bind ke versi PG tertentu, collation, encoding | Bisa di-`git`, di-`rsync`, di-`zip` |
-| **Debuggable** | `psql` — perlu query | `vim`, `grep`, `jq`, `cat`, `tail -f` |
+| **Memory** | Ratusan MB untuk database engine | Beberapa KB (isi file) |
+| **Backup** | Tool spesifik | `cp -r ~/.vyper/ backup/` |
+| **Restore** | Setup ulang — menit | `cp -r backup/ ~/.vyper/` — detik |
+| **Portabilitas** | Bind ke versi tertentu | Bisa di-`git`, di-`rsync`, di-`zip` |
+| **Debuggable** | Tool spesifik, perlu query | `vim`, `grep`, `jq`, `cat`, `tail -f` |
 | **Rollback** | `ROLLBACK;` — selama session belum close | Git checkout / undo file |
-| **Concurrent writers** | ✅ MVCC — 100 user aman | ⚠️ Single writer (cukup untuk personal) |
-| **Complex queries** | ✅ JOIN, GROUP BY, window functions | ⚠️ Filter di Python (cukup untuk 234 program) |
+| **Concurrent writers** | ✅ MVCC | ⚠️ Single writer (cukup untuk personal) |
+| **Complex queries** | ✅ JOIN, GROUP BY | ⚠️ Filter di Python (cukup untuk 234 program) |
 
 ### Kenapa JSON Menang untuk VYPER
 
@@ -337,39 +345,39 @@ Ini adalah **keputusan arsitektur yang disengaja**, bukan tradeoff.
 ~50MB total storage   # <<<<<<< Kurang dari 1 foto HP
 ```
 
-**Pada skala ini, SQL tidak memberikan keuntungan berarti:**
+**Pada skala ini, database engine tidak memberikan keuntungan berarti:**
 
 ```
-Query time: JSON (in-memory dict) vs PostgreSQL (localhost):
-──────────────────────────────────────────────────────────
-- List all programs:           0.3ms  vs  2ms
-- Filter by chain:             0.5ms  vs  3ms
-- Sort by bounty:              0.4ms  vs  4ms
-- Search by name:              0.6ms  vs  5ms
-- Full-text search:            1.2ms  vs  8ms
+Query time: JSON (in-memory dict) — semua < 10ms:
+──────────────────────────────────────────────────
+- List all programs:           0.3ms
+- Filter by chain:             0.5ms
+- Sort by bounty:              0.4ms
+- Search by name:              0.6ms
+- Full-text search:            1.2ms
 
 Semua masih < 10ms. Perbedaan tidak relevan untuk UX.
 ```
 
-### Yang JSON Berikan yang SQL Tidak Bisa
+### Keunggulan JSON untuk VYPER
 
-| Kemampuan | JSON | SQL |
-|-----------|------|-----|
-| **Bisa di-commit ke git** | ✅ `git add . && git commit -m "update"` | ❌ |
-| **Bisa di-diff** | ✅ `git diff programs.json` | ❌ |
-| **Bisa di-edit pake vim** | ✅ | ❌ |
-| **Bisa di-grep** | ✅ `grep -r "reentrancy" ~/.vyper/` | ❌ |
-| **Bisa di-copy via rsync** | ✅ `rsync -av ~/.vyper/ laptop2:~/.vyper/` | ❌ |
-| **Zero dependencies** | ✅ (bawaan Python) | ❌ |
-| **Berfungsi offline** | ✅ Full | ⚠️ (kecuali SQLite) |
-| **Tidak bisa corrupt** | ✅ Atomic write + backup | ⚠️ (wal corruption, vacuum) |
+| Kemampuan | Keterangan |
+|-----------|------------|
+| **Bisa di-commit ke git** | `git add . && git commit -m "update"` |
+| **Bisa di-diff** | `git diff programs.json` |
+| **Bisa di-edit pake vim** | Ya — langsung edit JSON |
+| **Bisa di-grep** | `grep -r "reentrancy" ~/.vyper/` |
+| **Bisa di-copy via rsync** | `rsync -av ~/.vyper/ laptop2:~/.vyper/` |
+| **Zero dependencies** | ✅ Bawaan Python (json module) |
+| **Berfungsi offline** | ✅ Full — tanpa koneksi apapun |
+| **Tidak bisa corrupt** | ✅ Atomic write + backup otomatis |
 
-### Enhanced JSON Storage — Kompensasi untuk Kekurangan JSON
+### Enhanced JSON Storage — Fitur yang Melengkapi JSON
 
-Meskipun JSON dipilih, kita tetap butuh beberapa fitur yang biasanya identik dengan SQL. Solusinya **bukan mengganti format, tapi menambahkan tools**:
+Meskipun JSON dipilih, kita tetap butuh beberapa fitur yang biasanya identik dengan database engine. Solusinya **bukan mengganti format, tapi menambahkan tools**:
 
-| Fitur SQL | Padanan JSON di VYPER |
-|-----------|----------------------|
+| Fitur | Padanan di VYPER |
+|-------|-----------------|
 | **ACID** | Atomic write (`.tmp` → rename) + append-only logs |
 | **Indexes** | File `indexes/by_chain.json`, `by_status.json`, dll |
 | **History / audit trail** | Append-only `.jsonl` — bisa di-`tail`, di-`grep` |
@@ -380,85 +388,127 @@ Meskipun JSON dipilih, kita tetap butuh beberapa fitur yang biasanya identik den
 
 ### Ringkasan
 
-> **SQL itu强大, tapi untuk personal use case VYPER, JSON lebih sederhana, lebih portable, dan zero-ops.**
->
-> Kalau nanti data mencapai 1M+ findings atau ada team collaboration, barulah pertimbangkan SQLite sebagai bridge — tanpa PostgreSQL. Tapi itu bukan sekarang.
+> **JSON files lebih sederhana, lebih portable, dan zero-ops untuk personal use case VYPER.**
 
 ---
 
-## 4. Arsitektur Microservice — 12 Services
+## 4. Arsitektur Microservice — 20 Services
 
 Setiap service adalah **FastAPI app sendiri** dalam **Docker container sendiri**.
 
 ### Service Map
 
 ```
-┌──────────────────────────────────────────────────────────────────┐
-│                                                                  │
-│   USER                                                           │
-│    │                                                             │
-│    ▼                                                             │
-│  ┌──────────────────────────────────────────────────────────┐   │
-│  │  DASHBOARD (port 8000)      API Gateway + Web UI         │   │
-│  │  FastAPI + Jinja2 + Tailwind CDN                         │   │
-│  └────────┬─────────────────────────────────────────────────┘   │
-│           │ HTTP/REST                                           │
-│           ▼                                                     │
-│  ┌──────────────────────────────────────────────────────────┐   │
-│  │  ORCHESTRATOR (port 8009)    Pipeline Coordinator        │   │
-│  │  - Audit pipeline                                          │   │
-│  │  - Priority queue                                          │   │
-│  │  - Daemon mode                                             │   │
-│  │  - Contract similarity                                     │   │
-│  │  - Retroactive re-run                                      │   │
-│  └──┬──┬──┬──┬──┬──┬──┬──┬──┬──┬────────────────────────────┘   │
-│     │  │  │  │  │  │  │  │  │  │                               │
-│     ▼  ▼  ▼  ▼  ▼  ▼  ▼  ▼  ▼  ▼                               │
-│  ┌────┐┌────┐┌────┐┌────┐┌────┐┌────┐┌────┐┌────┐┌────┐┌────┐│
-│  │ IM ││SRC ││SCN ││ AI ││CLS ││EXP ││RPT ││NTF ││WHK ││CFG ││
-│  │    ││    ││    ││    ││    ││    ││    ││    ││    ││    ││
-│  │8001││8002││8003││8004││8005││8006││8007││8008││8010││8011││
-│  └────┘└────┘└────┘└────┘└────┘└────┘└────┘└────┘└────┘└────┘│
-│                                                                  │
-│  + UPKEEP (port 8012) — Update + Backup + Metrics               │
-│                                                                  │
-│  Semua komunikasi via HTTP/REST.                                │
-│  Setiap service punya volume sendiri di ~/.vyper/{service}/      │
-│                                                                  │
-└──────────────────────────────────────────────────────────────────┘
+┌─────────────────────────────────────────────────────────────────────┐
+│                                                                     │
+│   USER                                                              │
+│    │                                                                │
+│    ▼                                                                │
+│  ┌─────────────────────────────────────────────────────────────┐   │
+│  │  DASHBOARD (port 8000)      API Gateway + React SPA         │   │
+│  │  React 18 SPA + TypeScript + Tailwind v4                    │   │
+│  └────────┬────────────────────────────────────────────────────┘   │
+│           │ HTTP/REST                                              │
+│           ▼                                                        │
+│  ┌─────────────────────────────────────────────────────────────┐   │
+│  │  ORCHESTRATOR (port 8009)    Pipeline Coordinator           │   │
+│  │  - Audit pipeline                                             │   │
+│  │  - Priority queue                                             │   │
+│  │  - Daemon mode                                                │   │
+│  │  - Contract similarity                                        │   │
+│  │  - Retroactive re-run                                         │   │
+│  └──┬──┬──┬──┬──┬──┬──┬──┬──┬──┬──┬──┬──┬──────────────────────┘   │
+│     │  │  │  │  │  │  │  │  │  │  │  │  │                        │
+│     ▼  ▼  ▼  ▼  ▼  ▼  ▼  ▼  ▼  ▼  ▼  ▼  ▼                        │
+│  ┌────┐┌────┐┌────┐┌────┐┌────┐┌────┐┌────┐┌────┐┌────┐┌────┐┌────┐│
+│  │ IM ││SRC ││SRT ││ AI ││CLS ││EXP ││RPT ││NTF ││WHK ││CFG ││UPK ││
+│  │    ││    ││    ││    ││    ││    ││    ││    ││    ││    ││    ││
+│  │8001││8002││8003││8004││8005││8006││8007││8008││8010││8011││8012││
+│  └────┘└────┘└────┘└────┘└────┘└────┘└────┘└────┘└────┘└────┘└────┘│
+│                                                                     │
+│  ┌── Scanner Tools (routed via SRT:8003) ──────────────────────┐   │
+│  │                                                              │   │
+│  │  ┌────┐┌────┐┌────┐┌────┐┌────┐                            │   │
+│  │  │MYT ││SLT ││ECH ││FRG ││HAL │                            │   │
+│  │  │8013││8014││8015││8016││8017│                            │   │
+│  │  └────┘└────┘└────┘└────┘└────┘                            │   │
+│  └──────────────────────────────────────────────────────────────┘   │
+│                                                                     │
+│  ┌── Additional Services ──────────────────────────────────────┐   │
+│  │  ┌────┐┌────┐                                               │   │
+│  │  │AGT ││SUB │                                               │   │
+│  │  │8018││    │                                               │   │
+│  │  └────┘└────┘                                               │   │
+│  └──────────────────────────────────────────────────────────────┘   │
+│                                                                     │
+│  Semua komunikasi via HTTP/REST.                                   │
+│  Setiap service punya volume sendiri di ~/.vyper/{service}/         │
+│                                                                     │
+└─────────────────────────────────────────────────────────────────────┘
 ```
 
 ### Service Detail
 
 | # | Service | Port | Tanggung Jawab | Bahasa |
 |---|---------|------|---------------|--------|
-| 1 | **Immunefi** | 8001 | Sync program, detect repos | Python |
-| 2 | **Source** | 8002 | Multi-source fetch (GitHub/Sourcify/Etherscan/Blockscout) | Python |
-| 3 | **Scanner** | 8003 | Slither/Mythril/Echidna + solc mgmt + deps | Python |
-| 4 | **AI** | 8004 | LLM analysis + verdict + severity | Python |
-| 5 | **Classifier** | 8005 | TP/FP/TN/FN + metrics + similarity | Python |
-| 6 | **Exploit** | 8006 | Anvil Docker engine + PoC generation | Python |
-| 7 | **Reporter** | 8007 | Generate immunefi.md + full.md | Python |
-| 8 | **Notifier** | 8008 | Discord/Telegram/Email/Desktop | Python |
-| 9 | **Orchestrator** | 8009 | Pipeline + queue + daemon + re-run | Python |
-| 10 | **Webhook** | 8010 | Webhook delivery + signature | Python |
-| 11 | **Config** | 8011 | Config management + API keys | Python |
-| 12 | **Upkeep** | 8012 | Self-update + backup + restore + metrics | Python |
+| 1 | **Dashboard** | 8000 | React SPA + API Gateway + SSE | TypeScript |
+| 2 | **Immunefi** | 8001 | Sync program, detect repos | Python |
+| 3 | **Source** | 8002 | Multi-source fetch (GitHub/Sourcify/Etherscan/Blockscout) | Python |
+| 4 | **Scanner Router** | 8003 | Route ke scanner tools + solc mgmt + deps | Python |
+| 5 | **AI** | 8004 | LLM analysis + verdict + severity | Python |
+| 6 | **Classifier** | 8005 | TP/FP/TN/FN + metrics + similarity | Python |
+| 7 | **Exploit** | 8006 | Anvil Docker engine + PoC generation | Python |
+| 8 | **Reporter** | 8007 | Generate immunefi.md + full.md | Python |
+| 9 | **Notifier** | 8008 | Discord/Telegram/Email/Desktop | Python |
+| 10 | **Orchestrator** | 8009 | Pipeline + queue + daemon + re-run | Python |
+| 11 | **Webhook** | 8010 | Webhook delivery + signature | Python |
+| 12 | **Config** | 8011 | Config management + API keys | Python |
+| 13 | **Upkeep** | 8012 | Self-update + backup + restore + metrics | Python |
+| 14 | **Scanner Mythril** | 8013 | Symbolic execution (sidecar, isolated) | Python |
+| 15 | **Scanner Slither** | 8014 | Static analysis (split from main scanner) | Python |
+| 16 | **Scanner Echidna** | 8015 | Fuzzing & property testing | Python |
+| 17 | **Scanner Forge** | 8016 | Build verification (Foundry) | Python |
+| 18 | **Scanner Halmos** | 8017 | Symbolic execution & formal verification | Python |
+| 19 | **Agent** | 8018 | Autonomous agent orchestration + memory | Python |
+| 20 | **Submission** | 8019 | Track bounties across platforms | Python |
 
 ### Repository Structure
 
 ```
 vyper/
 │
-├── docker-compose.yml              # Orchestrate semua service
+├── docker-compose.yml              # Orchestrate semua service (20 services)
 ├── Dockerfile.base                 # Base Python image
 ├── .env.example                    # API keys template
 ├── README.md
+├── VYPER.md                        # Dokumentasi arsitektur
+├── VYPER_ROADMAP.md                # Roadmap pengembangan
+├── ARCHITECTURE.md                 # Detail arsitektur
+├── IMPLEMENTATION_PLAN.md          # Implementation plan
 │
-├── services/                       # Setiap service sendiri
-│   ├── immunefi/
+├── vyper_lib/                      # Shared library (models + utilities)
+│   ├── __init__.py
+│   └── models.py                   # Pydantic models shared across services
+│
+├── cli/                            # Vyper CLI Tool (17 commands)
+│   ├── __init__.py
+│   ├── __main__.py
+│   ├── client.py                   # HTTP client wrapper
+│   ├── config.py                   # Config management
+│   ├── output.py                   # Rich output formatting
+│   └── commands/                   # Perintah CLI
+│       ├── docker.py               # docker compose lifecycle
+│       ├── audit.py                # Audit pipeline
+│       ├── scan.py                 # Direct scan
+│       ├── exploit.py              # Exploit generation
+│       ├── status.py               # Status monitoring
+│       ├── dashboard.py            # Dashboard launcher
+│       └── config_cmd.py           # Config commands
+│
+├── services/                       # 20 microservices
+│   ├── 01-immunefi/
 │   │   ├── Dockerfile
-│   │   ├── app.py                  # FastAPI app
+│   │   ├── app.py
 │   │   ├── requirements.txt
 │   │   └── src/
 │   │       ├── scraper.py
@@ -466,7 +516,7 @@ vyper/
 │   │       ├── repo_detector.py
 │   │       └── models.py
 │   │
-│   ├── source/
+│   ├── 02-source/
 │   │   ├── Dockerfile
 │   │   ├── app.py
 │   │   ├── requirements.txt
@@ -480,20 +530,52 @@ vyper/
 │   │           ├── blockscout.py
 │   │           └── manual.py
 │   │
-│   ├── scanner/
-│   │   ├── Dockerfile              # + solc binaries
+│   ├── 03-scanner-router/          # Router → tool services
+│   │   ├── Dockerfile
 │   │   ├── app.py
 │   │   ├── requirements.txt
 │   │   └── src/
-│   │       ├── slither.py
-│   │       ├── mythril.py
-│   │       ├── echidna.py
-│   │       ├── forge.py
+│   │       ├── router.py
 │   │       ├── solc_manager.py
 │   │       ├── deps.py
 │   │       └── slither_config.py
 │   │
-│   ├── ai/
+│   ├── 04a-scanner-slither/        # Static analysis
+│   │   ├── Dockerfile
+│   │   ├── app.py
+│   │   ├── requirements.txt
+│   │   └── src/
+│   │       └── analyzer.py
+│   │
+│   ├── 04b-scanner-echidna/        # Fuzzing & property testing
+│   │   ├── Dockerfile
+│   │   ├── app.py
+│   │   ├── requirements.txt
+│   │   └── src/
+│   │       └── fuzzer.py
+│   │
+│   ├── 04c-scanner-forge/          # Build verification (Foundry)
+│   │   ├── Dockerfile
+│   │   ├── app.py
+│   │   ├── requirements.txt
+│   │   └── src/
+│   │       └── builder.py
+│   │
+│   ├── 04d-scanner-halmos/         # Formal verification
+│   │   ├── Dockerfile
+│   │   ├── app.py
+│   │   ├── requirements.txt
+│   │   └── src/
+│   │       └── prover.py
+│   │
+│   ├── 05-scanner-mythril/         # Symbolic execution (sidecar)
+│   │   ├── Dockerfile
+│   │   ├── app.py
+│   │   ├── requirements.txt
+│   │   └── src/
+│   │       └── analyzer.py
+│   │
+│   ├── 06-ai/
 │   │   ├── Dockerfile
 │   │   ├── app.py
 │   │   ├── requirements.txt
@@ -502,7 +584,7 @@ vyper/
 │   │       ├── analyzer.py
 │   │       └── fixer.py
 │   │
-│   ├── classifier/
+│   ├── 07-classifier/
 │   │   ├── Dockerfile
 │   │   ├── app.py
 │   │   ├── requirements.txt
@@ -511,7 +593,7 @@ vyper/
 │   │       ├── metrics.py
 │   │       └── improver.py
 │   │
-│   ├── exploit/
+│   ├── 08-exploit/
 │   │   ├── Dockerfile
 │   │   ├── app.py
 │   │   ├── requirements.txt
@@ -522,7 +604,7 @@ vyper/
 │   │       ├── impersonator.py
 │   │       └── poc_generator.py
 │   │
-│   ├── reporter/
+│   ├── 09-reporter/
 │   │   ├── Dockerfile
 │   │   ├── app.py
 │   │   ├── requirements.txt
@@ -531,7 +613,7 @@ vyper/
 │   │       ├── full.py
 │   │       └── templates/
 │   │
-│   ├── notifier/
+│   ├── 10-notifier/
 │   │   ├── Dockerfile
 │   │   ├── app.py
 │   │   ├── requirements.txt
@@ -541,7 +623,7 @@ vyper/
 │   │       ├── desktop.py
 │   │       └── email.py
 │   │
-│   ├── orchestrator/
+│   ├── 11-orchestrator/
 │   │   ├── Dockerfile
 │   │   ├── app.py
 │   │   ├── requirements.txt
@@ -555,60 +637,130 @@ vyper/
 │   │       ├── test_intel.py
 │   │       └── resource_governor.py
 │   │
-│   ├── webhook/
+│   ├── 12-webhook/
 │   │   ├── Dockerfile
 │   │   ├── app.py
 │   │   ├── requirements.txt
 │   │   └── src/
 │   │       └── dispatcher.py
 │   │
-│   ├── config/
+│   ├── 13-config/
 │   │   ├── Dockerfile
 │   │   ├── app.py
 │   │   ├── requirements.txt
 │   │   └── src/
 │   │       └── manager.py
 │   │
-│   └── upkeep/
+│   ├── 14-upkeep/
+│   │   ├── Dockerfile
+│   │   ├── app.py
+│   │   ├── requirements.txt
+│   │   └── src/
+│   │       ├── update.py
+│   │       ├── backup.py
+│   │       └── metrics.py
+│   │
+│   ├── 15-agent/                   # Autonomous agent
+│   │   ├── Dockerfile
+│   │   ├── app.py
+│   │   ├── requirements.txt
+│   │   └── src/
+│   │       ├── memory.py           # Vector + Episodic + Graph memory
+│   │       ├── daemon.py           # Autonomous hunting daemon
+│   │       └── learner.py          # Feedback loop learning
+│   │
+│   ├── 16-dashboard/               # React SPA
+│   │   ├── Dockerfile              # Multi-stage: Node 20 → Python 3.11
+│   │   ├── app.py                  # FastAPI + static mount
+│   │   ├── requirements.txt
+│   │   ├── proxy.py                # API Gateway proxy to all services
+│   │   └── frontend/               # React SPA source
+│   │       ├── package.json
+│   │       ├── vite.config.ts
+│   │       ├── tsconfig.json
+│   │       ├── tailwind.config.ts
+│   │       ├── index.html
+│   │       └── src/
+│   │           ├── App.tsx
+│   │           ├── main.tsx
+│   │           ├── api.ts          # API client
+│   │           ├── Layout.tsx
+│   │           └── pages/          # 10 pages
+│   │               ├── ServiceHealth.tsx
+│   │               ├── Pipeline.tsx
+│   │               ├── ScannerDetail.tsx
+│   │               ├── ExploitViewer.tsx
+│   │               ├── ConfigEditor.tsx
+│   │               ├── NotifierStatus.tsx
+│   │               ├── WebhookLogs.tsx
+│   │               ├── SourceViewer.tsx
+│   │               ├── ReportCenter.tsx
+│   │               └── Scheduler.tsx
+│   │
+│   └── 17-submission/              # Bounty tracker
 │       ├── Dockerfile
 │       ├── app.py
 │       ├── requirements.txt
 │       └── src/
-│           ├── update.py
-│           ├── backup.py
-│           └── metrics.py
+│           └── tracker.py
 │
-├── tests/                           # Integration tests
+├── daily_agenda/                   # Agenda harian pengembangan
+│   ├── README.md
+│   ├── 01_immunefi_refactor_(high).md
+│   ├── 02_source_service_(high).md
+│   ├── 03_vyper_cli_tool_(critical).md
+│   ├── 04_exploit_service_(critical).md
+│   ├── 05_scanner_echidna_forge_(critical).md
+│   ├── 06_notifier_service_(high).md
+│   ├── 07_reporter_refactor_(high).md
+│   ├── 08_orchestrator_refactor_(high).md
+│   ├── 09_dashboard_react_spa_(critical).md
+│   ├── 10_vyper_lib_refactor_(high).md
+│   ├── 11_halmos_formal_verification_(critical).md
+│   ├── 12_autonomous_agent_intelligence_(critical).md
+│   ├── 13_github_actions_cicd_pipeline_(high).md
+│   ├── 14_custom_slither_detectors_engine_(high).md
+│   └── 15_production_hardening_performance_(high).md
+│
+├── tests/                          # Integration tests
 │   ├── test_pipeline.py
 │   └── test_services.py
 │
-└── scripts/
-    ├── install.sh
-    └── dev.sh                       # docker compose up --build
+├── scripts/
+│   ├── install.sh
+│   ├── install-cli.ps1
+│   └── dev.sh                      # docker compose up --build
+│
+└── docs/                           # Dokumentasi tambahan
+    ├── VYPER.md
+    ├── ARCHITECTURE.md
+    ├── IMPLEMENTATION_PLAN.md
+    ├── DASHBOARD.md
+    ├── SCANNER_SPLIT_PLAN.md
+    └── VYPER_ROADMAP.md
 ```
 
 ### Docker Compose
 
 ```yaml
-# docker-compose.yml
-
-version: "3.9"
+# docker-compose.yml — 20 services
 
 services:
+  # ─── Gateway & Orchestrator ───────────────────────────────
   dashboard:
-    build: services/dashboard
+    build: services/16-dashboard
     ports: ["8000:8000"]
     volumes: [vyper_data:/data/dashboard, vyper_learning:/data/learning]
     depends_on: [orchestrator, config]
 
   orchestrator:
-    build: services/orchestrator
+    build: services/11-orchestrator
     ports: ["8009:8009"]
     volumes: [vyper_orchestrator:/data/orchestrator, vyper_learning:/data/learning]
     depends_on:
       - immunefi
       - source
-      - scanner
+      - scanner-router
       - ai
       - classifier
       - exploit
@@ -616,67 +768,112 @@ services:
       - notifier
       - config
 
+  # ─── Data Services ───────────────────────────────────────
   immunefi:
-    build: services/immunefi
+    build: services/01-immunefi
     ports: ["8001:8001"]
     volumes: [vyper_immunefi:/data/immunefi]
 
   source:
-    build: services/source
+    build: services/02-source
     ports: ["8002:8002"]
     volumes: [vyper_source:/data/source]
 
-  scanner:
-    build: services/scanner
+  # ─── Scanner Router → Tool Services ──────────────────────
+  scanner-router:
+    build: services/03-scanner-router
     ports: ["8003:8003"]
     volumes: [vyper_scanner:/data/scanner]
-    # Privileged for Docker-in-Docker? No — Scanner panggil Slither langsung,
-    # bukan Docker. Hanya Exploit service yang butuh Docker.
+    depends_on:
+      - scanner-slither
+      - scanner-echidna
+      - scanner-forge
+      - scanner-halmos
+      - scanner-mythril
 
+  scanner-slither:
+    build: services/04a-scanner-slither
+    ports: ["8014:8014"]
+    volumes: [vyper_scanner:/data/scanner]
+
+  scanner-echidna:
+    build: services/04b-scanner-echidna
+    ports: ["8015:8015"]
+    volumes: [vyper_scanner:/data/scanner]
+
+  scanner-forge:
+    build: services/04c-scanner-forge
+    ports: ["8016:8016"]
+    volumes: [vyper_scanner:/data/scanner]
+
+  scanner-halmos:
+    build: services/04d-scanner-halmos
+    ports: ["8017:8017"]
+    volumes: [vyper_scanner:/data/scanner]
+
+  scanner-mythril:
+    build: services/05-scanner-mythril
+    ports: ["8013:8013"]
+    volumes: [vyper_scanner:/data/scanner]
+
+  # ─── Analysis Services ───────────────────────────────────
   ai:
-    build: services/ai
+    build: services/06-ai
     ports: ["8004:8004"]
     volumes: [vyper_ai:/data/ai]
     environment:
       - OPENAI_API_KEY=${OPENAI_API_KEY}
 
   classifier:
-    build: services/classifier
+    build: services/07-classifier
     ports: ["8005:8005"]
     volumes: [vyper_classifier:/data/classifier, vyper_learning:/data/learning]
 
+  # ─── Exploit & Reporting ─────────────────────────────────
   exploit:
-    build: services/exploit
+    build: services/08-exploit
     ports: ["8006:8006"]
-    volumes: [vyper_exploit:/data/exploit]
-    # Satu-satunya service yang butuh Docker socket
     volumes:
-      - /var/run/docker.sock:/var/run/docker.sock:ro
+      - vyper_exploit:/data/exploit
+      - /var/run/docker.sock:/var/run/docker.sock:rw  # Docker socket for Anvil
 
   reporter:
-    build: services/reporter
+    build: services/09-reporter
     ports: ["8007:8007"]
     volumes: [vyper_reporter:/data/reporter]
 
   notifier:
-    build: services/notifier
+    build: services/10-notifier
     ports: ["8008:8008"]
     volumes: [vyper_notifier:/data/notifier]
 
+  # ─── Infrastructure ──────────────────────────────────────
   webhook:
-    build: services/webhook
+    build: services/12-webhook
     ports: ["8010:8010"]
     volumes: [vyper_webhook:/data/webhook]
 
   config:
-    build: services/config
+    build: services/13-config
     ports: ["8011:8011"]
     volumes: [vyper_config:/data/config]
 
   upkeep:
-    build: services/upkeep
+    build: services/14-upkeep
     ports: ["8012:8012"]
     volumes: [vyper_upkeep:/data/upkeep]
+
+  # ─── Advanced Services ───────────────────────────────────
+  agent:
+    build: services/15-agent
+    ports: ["8018:8018"]
+    volumes: [vyper_agent:/data/agent, vyper_learning:/data/learning]
+    depends_on: [orchestrator]
+
+  submission:
+    build: services/17-submission
+    ports: ["8019:8019"]
+    volumes: [vyper_submission:/data/submission]
 
 volumes:
   vyper_immunefi:
@@ -691,6 +888,8 @@ volumes:
   vyper_webhook:
   vyper_config:
   vyper_upkeep:
+  vyper_agent:
+  vyper_submission:
   vyper_data:
   vyper_learning:
 ```
@@ -698,23 +897,26 @@ volumes:
 ### Inter-Service Communication Pattern
 
 ```
-┌──────────────────────────────────────────────────────────────┐
-│                 ORCHESTRATOR                                  │
-│                                                              │
-│  POST /audit/start {address, chain}                          │
-│    │                                                          │
-│    ├─→ GET /immunefi/program/{address}   ← Immunefi:8001    │
-│    ├─→ GET /source/fetch/{address}       ← Source:8002      │
-│    ├─→ POST /scanner/scan {source}       ← Scanner:8003     │
-│    ├─→ POST /ai/analyze {findings}       ← AI:8004          │
-│    ├─→ POST /classifier/classify {data}  ← Classifier:8005  │
-│    ├─→ POST /exploit/run {finding}       ← Exploit:8006     │
-│    ├─→ POST /reporter/generate {data}    ← Reporter:8007    │
-│    └─→ POST /notifier/send {notification}← Notifier:8008    │
-│                                                              │
-│  Semua synchronous HTTP call dengan timeout 30s-300s.        │
-│  Kalau service down → error boundary → partial result.       │
-└──────────────────────────────────────────────────────────────┘
+┌───────────────────────────────────────────────────────────────────┐
+│                 ORCHESTRATOR                                       │
+│                                                                   │
+│  POST /audit/start {address, chain}                               │
+│    │                                                               │
+│    ├─→ GET /immunefi/program/{address}     ← Immunefi:8001       │
+│    ├─→ GET /source/fetch/{address}         ← Source:8002         │
+│    ├─→ POST /scanner-router/scan {source}  ← Scanner Router:8003 │
+│    │      └─→ routes to → [Slither:8014] [Echidna:8015]          │
+│    │                    → [Forge:8016] [Halmos:8017] [Mythril:8013]│
+│    ├─→ POST /ai/analyze {findings}         ← AI:8004             │
+│    ├─→ POST /classifier/classify {data}    ← Classifier:8005     │
+│    ├─→ POST /exploit/run {finding}         ← Exploit:8006        │
+│    ├─→ POST /agent/analyze {findings}      ← Agent:8018          │
+│    ├─→ POST /reporter/generate {data}      ← Reporter:8007       │
+│    └─→ POST /notifier/send {notification}  ← Notifier:8008       │
+│                                                                   │
+│  Semua synchronous HTTP call dengan timeout 30s-300s.             │
+│  Kalau service down → error boundary → partial result.            │
+└───────────────────────────────────────────────────────────────────┘
 ```
 
 ### Kenapa Bukan Monolith?
@@ -768,38 +970,43 @@ Setiap audit memiliki state yang jelas. Orchestrator yang pegang state.
                      success          fail
                         ▼              ▼
               ┌──────────────┐  ┌──────────────┐
-              │ SCANNING     │  │ SOURCE_FAILED│ ← Abort, retry next cycle
-              └──────┬───────┘  └──────────────┘
-                     │ success
-                     ▼
-              ┌──────────────┐
-              │ AI_ANALYSIS  │ ← AI Service
-              └──────┬───────┘
-                     │ success
-                     ▼
-              ┌──────────────┐
-              │ CLASSIFYING  │ ← Classifier Service
-              └──────┬───────┘
-                     │ success
-                     ▼
-              ┌──────────────┐
-              │ EXPLOITING   │ ← Exploit Service (HANYA jika TP critical/high)
-              └──────┬───────┘
-                     │ success
-                     ▼
-              ┌──────────────┐
-              │ REPORTING    │ ← Reporter Service
-              └──────┬───────┘
-                     │ success
-                     ▼
-              ┌──────────────┐
-              │ NOTIFYING    │ ← Notifier Service (HANYA jika critical/high)
-              └──────┬───────┘
-                     │ success
-                     ▼
-              ┌──────────────┐
-              │  COMPLETED   │ ✓
-              └──────────────┘
+               │ SCANNING     │  │ SOURCE_FAILED│ ← Abort, retry next cycle
+               └──────┬───────┘  └──────────────┘
+                      │ success
+                      ▼
+               ┌──────────────────┐
+               │ HALMOS_ANALYSIS  │ ← Halmos formal verification
+               └──────┬───────────┘
+                      │ success
+                      ▼
+               ┌──────────────┐
+               │ AI_ANALYSIS  │ ← AI Service
+               └──────┬───────┘
+                      │ success
+                      ▼
+               ┌──────────────┐
+               │ CLASSIFYING  │ ← Classifier Service
+               └──────┬───────┘
+                      │ success
+                      ▼
+               ┌──────────────┐
+               │ EXPLOITING   │ ← Exploit Service (HANYA jika TP critical/high)
+               └──────┬───────┘
+                      │ success
+                      ▼
+               ┌──────────────┐
+               │ REPORTING    │ ← Reporter Service
+               └──────┬───────┘
+                      │ success
+                      ▼
+               ┌──────────────┐
+               │ NOTIFYING    │ ← Notifier Service (HANYA jika critical/high)
+               └──────┬───────┘
+                      │ success
+                      ▼
+               ┌──────────────┐
+               │  COMPLETED   │ ✓
+               └──────────────┘
 
   State transitions dicatat di orchestrator/audit_log.json
   Setiap state punya: id, status, started_at, finished_at, duration, error
@@ -817,6 +1024,7 @@ class AuditState(str, Enum):
     FETCHING_PROGRAM   = "fetching_program"
     FETCHING_SOURCE    = "fetching_source"
     SCANNING           = "scanning"
+    HALMOS_ANALYSIS    = "halmos_analysis"
     AI_ANALYSIS        = "ai_analysis"
     CLASSIFYING        = "classifying"
     EXPLOITING         = "exploiting"
@@ -827,6 +1035,7 @@ class AuditState(str, Enum):
     # Failure states — perlu user action atau retry
     SOURCE_FAILED      = "source_failed"
     SCAN_FAILED        = "scan_failed"
+    HALMOS_FAILED      = "halmos_failed"
     AI_FAILED          = "ai_failed"
     CLASSIFY_FAILED    = "classify_failed"
     EXPLOIT_FAILED     = "exploit_failed"
@@ -920,14 +1129,20 @@ class WorkflowEngine:
     """
 
     SERVICES = {
-        "immunefi":    "http://02-immunefi:8001",
-        "source":      "http://03-source:8002",
-        "scanner":     "http://04-scanner:8003",
-        "ai":          "http://06-ai:8004",
-        "classifier":  "http://07-classifier:8005",
-        "exploit":     "http://08-exploit:8006",
-        "reporter":    "http://09-reporter:8007",
-        "notifier":    "http://10-notifier:8008",
+        "immunefi":      "http://01-immunefi:8001",
+        "source":        "http://02-source:8002",
+        "scanner":       "http://03-scanner-router:8003",
+        "scanner-slither":  "http://04a-scanner-slither:8014",
+        "scanner-echidna":  "http://04b-scanner-echidna:8015",
+        "scanner-forge":    "http://04c-scanner-forge:8016",
+        "scanner-halmos":   "http://04d-scanner-halmos:8017",
+        "scanner-mythril":  "http://05-scanner-mythril:8013",
+        "ai":            "http://06-ai:8004",
+        "classifier":    "http://07-classifier:8005",
+        "exploit":       "http://08-exploit:8006",
+        "reporter":      "http://09-reporter:8007",
+        "notifier":      "http://10-notifier:8008",
+        "agent":         "http://15-agent:8018",
     }
 
     def __init__(self, audit_id: str):
@@ -976,6 +1191,18 @@ class WorkflowEngine:
                       "chain": chain},
                 key="scan_results",
                 timeout=900  # 15 menit
+            )
+
+            # Step 3b: Halmos formal verification (parallel after scan)
+            await self._step(
+                AuditState.HALMOS_ANALYSIS,
+                "scanner-halmos",
+                "/prove",
+                method="POST",
+                json={"source_path": self.context["source"]["path"],
+                      "chain": chain},
+                key="halmos_results",
+                timeout=600  # 10 menit
             )
 
             # Step 4: AI analysis
@@ -1350,7 +1577,7 @@ if __name__ == "__main__":
 | Komponen | Sebelumnya (SaaS) | Sekarang (Local-First) |
 |----------|-------------------|------------------------|
 | **Bahasa** | TypeScript + Python + Go | **Python saja** |
-| **Database** | PostgreSQL (10 instance) | **JSON files** |
+| **Database** | Database per service | **JSON files (zero DB)** |
 | **Message Queue** | NATS/RabbitMQ | **Function calls** |
 | **Services** | 14 microservices | **1 Python package** |
 | **Auth** | JWT, RBAC, API keys | **Tidak perlu** |
@@ -1367,7 +1594,7 @@ if __name__ == "__main__":
 
 | Fitur | Dulu | Sekarang |
 |-------|------|----------|
-| Immunefi 234+ programs | PostgreSQL | JSON files |
+| Immunefi 234+ programs | DB tables | JSON files |
 | TP/FP/TN/FN classification | DB table | JSON field |
 | AI Analysis | Python service | Python module |
 | Exploit Engine (Anvil) | Isolated service | Isolated via Docker |
@@ -5085,44 +5312,54 @@ rpc_stats = rpc_queue.stats()  # Untuk dashboard
 VYPER — MICROSERVICE SMART CONTRACT BUG HUNTER
 ══════════════════════════════════════════════════════════════════════
 
- Arsitektur:    12 microservices (Docker Compose)
+ Arsitektur:    20 microservices (Docker Compose)
  Komunikasi:    HTTP/REST (httpx async)
- Orchestrator:  Workflow Engine — 9 state state machine
+ Orchestrator:  Workflow Engine — 11 state state machine
  Storage:       Per-service Docker volumes (JSON + Markdown)
- Bahasa:        Python 3.11+ (semua service)
+ Bahasa:        Python 3.11+ (19 service) + TypeScript (Dashboard React SPA)
+ Dashboard FE:  React 18 SPA + TypeScript + Tailwind v4 + Vite
  Docker:        Semua service di-container (exploit butuh Docker socket)
 
  SERVICE MAP:
  ══════════════════════════════════════════════════════════════════
- 8000  Dashboard    — API Gateway + Web UI (Jinja2 + Tailwind CDN)
- 8001  Immunefi    — Sync 234+ program, detect repos
- 8002  Source      — Multi-source fetch (GitHub/Sourcify/Etherscan)
- 8003  Scanner     — Slither + Mythril + Echidna + solc + forge
- 8004  AI          — LLM analysis + severity + fix recommendation
- 8005  Classifier  — TP/FP/TN/FN + metrics + similarity
- 8006  Exploit     — Anvil Docker engine + PoC generation
- 8007  Reporter    — Immunefi + full report generation
- 8008  Notifier    — Discord + Telegram + Email + Desktop
- 8009  Orchestrator— Workflow engine + queue + daemon + re-run
- 8010  Webhook     — Webhook delivery + signature verification
- 8011  Config      — Config management + API keys
- 8012  Upkeep      — Self-update + backup + restore + metrics
+ 8000  Dashboard     — React SPA + API Gateway + SSE
+ 8001  Immunefi     — Sync 234+ program, detect repos
+ 8002  Source       — Multi-source fetch (GitHub/Sourcify/Etherscan/Blockscout)
+ 8003  Scanner Rtr  — Router ke 5 scanner tool services
+ 8004  AI           — LLM analysis + severity + fix recommendation
+ 8005  Classifier   — TP/FP/TN/FN + metrics + similarity
+ 8006  Exploit      — Anvil Docker engine + PoC generation
+ 8007  Reporter     — Immunefi + full report generation
+ 8008  Notifier     — Discord + Telegram + Email + Desktop
+ 8009  Orchestrator — Workflow engine + queue + daemon + re-run
+ 8010  Webhook      — Webhook delivery + signature verification
+ 8011  Config       — Config management + API keys
+ 8012  Upkeep       — Self-update + backup + restore + metrics
+ 8013  Mythril      — Symbolic execution (sidecar, isolated)
+ 8014  Slither      — Static analysis (split from main scanner)
+ 8015  Echidna      — Fuzzing & property testing
+ 8016  Forge        — Build verification (Foundry)
+ 8017  Halmos       — Formal verification & symbolic execution
+ 8018  Agent        — Autonomous agent orchestration + memory
+ 8019  Submission   — Track bounties across platforms
 
  WORKFLOW STATE MACHINE:
  ══════════════════════════════════════════════════════════════════
  PENDING → FETCHING_PROGRAM → FETCHING_SOURCE → SCANNING →
- AI_ANALYSIS → CLASSIFYING → [EXPLOITING] → REPORTING →
- [NOTIFYING] → COMPLETED
- └─ Failure states: SOURCE_FAILED, SCAN_FAILED, AI_FAILED,
-    CLASSIFY_FAILED, EXPLOIT_FAILED, TIMEOUT, ABORTED
+ HALMOS_ANALYSIS → AI_ANALYSIS → CLASSIFYING → [EXPLOITING] →
+ REPORTING → [NOTIFYING] → COMPLETED
+ └─ Failure states: SOURCE_FAILED, SCAN_FAILED, HALMOS_FAILED,
+    AI_FAILED, CLASSIFY_FAILED, EXPLOIT_FAILED, TIMEOUT, ABORTED
 
- 35 FITUR LENGKAP:
+ 40+ FITUR LENGKAP:
  ══════════════════════════════════════════════════════════════════
- ✅ 12 microservices     — Setiap service independen, volume sendiri
- ✅ Workflow engine      — State machine 9 state + saga compensation
+ ✅ 20 microservices     — Setiap service independen, volume sendiri
+ ✅ Workflow engine      — State machine 11 state + saga compensation
  ✅ API contracts        — Contract-first, tiap service punya spec
  ✅ Immunefi sync        — 234+ program, contract addresses
- ✅ Static analysis      — Slither + Mythril + Echidna
+ ✅ Scanner split        — 5 independent scanner services (router + tools)
+ ✅ Halmos formal verif  — Symbolic execution & formal verification
+ ✅ Static analysis      — Slither + Mythril + Echidna + Forge
  ✅ AI analysis          — LLM verdict + severity + fix
  ✅ TP/FP/TN/FN          — 4-quadrant classification
  ✅ Exploit engine       — Anvil isolated, PoC generation
@@ -5131,7 +5368,7 @@ VYPER — MICROSERVICE SMART CONTRACT BUG HUNTER
  ✅ Feedback loop        — FP/FN → reclassify + improve
  ✅ Retroactive re-run   — Pattern baru → scan ulang audit lama
  ✅ Submission tracker   — Lacak bounty, status, earnings
- ✅ Dashboard browser    — 14 halaman, expandable details
+ ✅ React SPA dashboard  — 10 pages, real-time SSE, TypeScript
  ✅ Error handling       — Graceful, partial results + retry
  ✅ First-run wizard     — Auto setup, config, Docker check
  ✅ Dual reporting       — Immunefi ready + Full internal
@@ -5149,12 +5386,16 @@ VYPER — MICROSERVICE SMART CONTRACT BUG HUNTER
  ✅ Backup & restore     — Weekly auto-backup, named snapshots
  ✅ Resource governor    — Throttle saat laptop dipakai / battery low
  ✅ Webhook system       — POST events ke Slack, PagerDuty, etc
+ ✅ CLI tool             — 17 commands (Typer + Rich), pip install
  ✅ CLI completion       — Bash/Zsh/PowerShell auto-completion
  ✅ RPC rate limiter     — Token bucket + queue + failover per provider
  ✅ Autonomous daemon    — 24/7 auto-hunt via orchestrator
- ✅ Daemon live log      — Real-time log di dashboard + terminal
+ ✅ Agent intelligence   — Memory system + autonomous agent daemon
+ ✅ Custom detectors     — Extensible Slither/Halmos detection engine
+ ✅ CI/CD pipeline       — GitHub Actions + GHCR + PR comments
+ ✅ Production hardening — Resource governor + caching + saga recovery
 
- TOTAL:   12 services, ~35 fitur, ~7,000 baris (est.)
+ TOTAL:   20 services, ~40+ fitur, ~12,000+ baris (est.)
  DEPLOY:  docker compose up
  DATA:    Docker volumes (JSON + Markdown)
 ```
@@ -5162,8 +5403,8 @@ VYPER — MICROSERVICE SMART CONTRACT BUG HUNTER
 ---
 
 > **Vyper — Microservice Smart Contract Bug Hunter**
-> 12 services. HTTP/REST. Docker Compose.
+> 20 services. HTTP/REST. Docker Compose.
 > Self-improving. Belajar dari setiap feedback.
 > Local-first, microservice-powered.
 >
-> *Generated by lore-master — 17 Mei 2026*
+> *Generated by lore-master — 20 Mei 2026*

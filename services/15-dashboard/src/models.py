@@ -10,7 +10,7 @@ from datetime import datetime, timezone
 from enum import Enum
 from typing import Any, Dict, List, Optional
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, field_validator
 
 
 # ── Enums ───────────────────────────────────────────────────────
@@ -45,11 +45,22 @@ class PipelineState(str, Enum):
 
 
 class Severity(str, Enum):
-    CRITICAL = "critical"
-    HIGH = "high"
-    MEDIUM = "medium"
-    LOW = "low"
-    INFORMATIONAL = "informational"
+    CRITICAL = "Critical"
+    HIGH = "High"
+    MEDIUM = "Medium"
+    LOW = "Low"
+    INFO = "Info"
+
+
+# Mapping from lowercase to display-friendly values
+SEVERITY_MAP = {
+    "critical": "Critical",
+    "high": "High",
+    "medium": "Medium",
+    "low": "Low",
+    "info": "Info",
+    "informational": "Info",
+}
 
 
 class FeedbackStatus(str, Enum):
@@ -199,3 +210,115 @@ class ProgramDetail(BaseModel):
     contracts: List[Dict[str, str]] = Field(default_factory=list)
     repos: List[str] = Field(default_factory=list)
     audit_history: List[Dict[str, Any]] = Field(default_factory=list)
+
+
+# ═══════════════════════════════════════════════════════════════
+# Case Management — Agenda 05: Each Bug Is Cases
+# ═══════════════════════════════════════════════════════════════
+
+
+class ConfidenceLabel(str, Enum):
+    """Empat label confidence — Agenda 06: Confidence atas Temuan."""
+    LOW = "Low"
+    MEDIUM = "Medium"
+    HIGH = "High"
+    CRITICAL = "Critical"
+
+
+# Urutan untuk sorting: Critical = 0 (paling atas), Low = 3 (paling bawah)
+CONFIDENCE_LABEL_ORDER: dict[str, int] = {
+    "Critical": 0,
+    "High": 1,
+    "Medium": 2,
+    "Low": 3,
+}
+
+
+class CaseStatus(str, Enum):
+    OPEN = "OPEN"
+    CLOSED = "CLOSED"
+
+
+class ClosedReason(str, Enum):
+    CONFIRMED = "confirmed"
+    REJECTED = "rejected"
+    DUPLICATE = "duplicate"
+    FALSE_POSITIVE = "false_positive"
+
+
+class ScannerFinding(BaseModel):
+    name: str
+    detector: str
+    confidence: float = Field(ge=0.0, le=1.0)
+
+
+class CaseCreate(BaseModel):
+    """Payload from Agent to create a new case."""
+    project: str
+    scanners: List[ScannerFinding]
+    severity: str = "Medium"
+    title: str
+    contract: str = ""
+    function: str = ""
+    line: int = 0
+    description: str = ""
+    recommendation: str = ""
+    proof_of_concept: str = ""
+    platform: str = ""
+    notes: str = ""
+
+    @field_validator("severity")
+    @classmethod
+    def validate_severity(cls, v: str) -> str:
+        """Normalize severity to display-friendly format."""
+        if v in SEVERITY_MAP:
+            return SEVERITY_MAP[v]
+        if v not in {e.value for e in Severity}:
+            raise ValueError(f"Invalid severity: '{v}'. Must be one of: {[e.value for e in Severity]}")
+        return v
+
+
+class CaseClose(BaseModel):
+    """Payload from User to close a case."""
+    closed_reason: ClosedReason
+    bounty_amount: Optional[float] = None
+    notes: str = ""
+
+
+class Case(BaseModel):
+    """Full Case model — stored as YAML in ~/.sc_auditor/cases/CASE-XXX/meta.yaml."""
+    case_id: str
+    status: CaseStatus = CaseStatus.OPEN
+    project: str = ""
+    scanners: List[ScannerFinding] = Field(default_factory=list)
+    confidence: float = 0.0
+    confidence_label: str = "Medium"
+    confidence_factors: List[str] = Field(default_factory=list)
+    scanner_count: int = 0
+    severity: str = "Medium"
+    title: str = ""
+    contract: str = ""
+    function: str = ""
+    line: int = 0
+    description: str = ""
+    recommendation: str = ""
+    proof_of_concept: str = ""
+    platform: str = ""
+    bounty_amount: Optional[float] = None
+    notes: str = ""
+    created_at: str = ""
+    closed_at: Optional[str] = None
+    closed_reason: Optional[str] = None
+
+
+class CaseStats(BaseModel):
+    """Aggregated case statistics for dashboard."""
+    total_cases: int = 0
+    open_cases: int = 0
+    closed_cases: int = 0
+    total_bounty: float = 0.0
+    avg_confidence: float = 0.0
+    by_severity: Dict[str, int] = Field(default_factory=dict)
+    by_scanner: Dict[str, int] = Field(default_factory=dict)
+    label_distribution: Dict[str, int] = Field(default_factory=dict)
+    recent_cases: List[Case] = Field(default_factory=list)

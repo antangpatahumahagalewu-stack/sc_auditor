@@ -4,6 +4,7 @@ Usage:
     vyper scan contract.sol
     vyper scan contract.sol --tools slither,mythril --compiler 0.8.20
     vyper scan contract.sol --json
+    vyper scan contract.sol --halmos
 """
 
 from __future__ import annotations
@@ -36,8 +37,9 @@ def scan(
     timeout: int = typer.Option(600, "--timeout", help="Scan timeout in seconds"),
     json_output: bool = typer.Option(False, "--json", "-j", help="Output as JSON"),
     verbose: bool = typer.Option(False, "--verbose", "-v", help="Show detailed output"),
+    halmos: bool = typer.Option(False, "--halmos", help="Enable Halmos formal verification (symbolic execution)"),
 ) -> None:
-    """Run analysis tools directly on a Solidity contract (bypasses pipeline)."""
+    """Run analysis tools directly on a Solidity contract (bypasses pipeline). Supports --halmos flag for symbolic execution."""
     path = Path(file_path)
     if not path.exists():
         show_error(f"File not found: {file_path}")
@@ -61,6 +63,8 @@ def scan(
         console.print(f"[dim]Found {len(sources)} .sol files[/]")
 
     tool_list = [t.strip() for t in tools.split(",") if t.strip()]
+    if halmos and "halmos" not in tool_list:
+        tool_list.append("halmos")
 
     async def _run() -> None:
         async with VyperClient() as client:

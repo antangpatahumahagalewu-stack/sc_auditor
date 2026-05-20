@@ -6,3 +6,6 @@ pydantic-settings>=2.3.0
 structlog>=24.2.0
 tenacity>=8.5.0
 python-multipart>=0.0.9
+pyyaml>=6.0
+weasyprint>=62.0
+slowapi>=0.1.9

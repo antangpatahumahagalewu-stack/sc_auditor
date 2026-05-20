@@ -10,6 +10,9 @@ mapping and can be overridden via environment variables, e.g.::
 from __future__ import annotations
 
 import os
+import tempfile
+from pathlib import Path
+from typing import Any, Dict
 
 import httpx
 import pytest
@@ -22,6 +25,11 @@ _SERVICE_URLS: dict[str, str] = {
     "immunefi": "http://localhost:8001",
     "source": "http://localhost:8002",
     "scanner": "http://localhost:8003",
+    "scanner_slither": "http://localhost:8014",
+    "scanner_echidna": "http://localhost:8015",
+    "scanner_forge": "http://localhost:8016",
+    "scanner_halmos": "http://localhost:8017",
+    "scanner_mythril": "http://localhost:8013",
     "ai": "http://localhost:8004",
     "classifier": "http://localhost:8005",
     "exploit": "http://localhost:8006",
@@ -30,7 +38,9 @@ _SERVICE_URLS: dict[str, str] = {
     "orchestrator": "http://localhost:8009",
     "webhook": "http://localhost:8010",
     "upkeep": "http://localhost:8012",
-    "scanner_halmos": "http://localhost:8017",
+    "agent": "http://localhost:8014",  # Note: 14-agent uses port 8014
+    "dashboard": "http://localhost:8000",
+    "submission": "http://localhost:8018",
 }
 
 
@@ -56,6 +66,40 @@ async def async_client() -> httpx.AsyncClient:
     """Shared HTTP client for all integration tests."""
     async with httpx.AsyncClient(timeout=30.0) as client:
         yield client
+
+
+# ── Sample data fixtures ────────────────────────────────────────
+
+
+@pytest.fixture()
+def sample_contract_address() -> str:
+    """A well-known test contract address (WETH on Ethereum)."""
+    return "0xC02aaA39b223FE8D0A0e5C4F27eAD9083C756Cc2"
+
+
+@pytest.fixture()
+def sample_audit_payload() -> dict[str, Any]:
+    """Standard payload for starting a new audit."""
+    return {
+        "chain": "ethereum",
+        "address": "0xC02aaA39b223FE8D0A0e5C4F27eAD9083C756Cc2",
+        "program": "test-program",
+        "priority": 5,
+    }
+
+
+@pytest.fixture()
+def sample_case_data() -> dict[str, Any]:
+    """Sample Case data for Case Management tests."""
+    return {
+        "title": "Reentrancy in Vault.withdraw()",
+        "description": "The withdraw function does not follow CEI pattern.",
+        "severity": "High",
+        "contract": "Vault",
+        "function": "withdraw",
+        "detector": "slither",
+        "recommendation": "Apply checks-effects-interactions pattern.",
+    }
 
 
 # ── Individual service URL fixtures ─────────────────────────────
@@ -84,26 +128,35 @@ def scanner_url() -> str:
     """Scanner Service URL (legacy monolith)."""
     return _service_url("scanner")
 
+
 @pytest.fixture()
 def scanner_slither_url() -> str:
     """Scanner Slither Service URL."""
-    return _service_url("scanner_slither") or "http://04a-scanner-slither:8014"
+    return _service_url("scanner_slither")
+
 
 @pytest.fixture()
 def scanner_echidna_url() -> str:
     """Scanner Echidna Service URL."""
-    return _service_url("scanner_echidna") or "http://04b-scanner-echidna:8015"
+    return _service_url("scanner_echidna")
+
 
 @pytest.fixture()
 def scanner_forge_url() -> str:
     """Scanner Forge Service URL."""
-    return _service_url("scanner_forge") or "http://04c-scanner-forge:8016"
+    return _service_url("scanner_forge")
 
 
 @pytest.fixture()
 def scanner_halmos_url() -> str:
     """Scanner Halmos Service URL."""
-    return _service_url("scanner_halmos") or "http://04d-scanner-halmos:8017"
+    return _service_url("scanner_halmos")
+
+
+@pytest.fixture()
+def scanner_mythril_url() -> str:
+    """Scanner Mythril Service URL."""
+    return _service_url("scanner_mythril")
 
 
 @pytest.fixture()
@@ -152,3 +205,21 @@ def webhook_url() -> str:
 def upkeep_url() -> str:
     """Upkeep Service URL."""
     return _service_url("upkeep")
+
+
+@pytest.fixture()
+def agent_url() -> str:
+    """Agent Service URL."""
+    return _service_url("agent")
+
+
+@pytest.fixture()
+def dashboard_url() -> str:
+    """Dashboard Service URL."""
+    return _service_url("dashboard")
+
+
+@pytest.fixture()
+def submission_url() -> str:
+    """Submission Service URL."""
+    return _service_url("submission")

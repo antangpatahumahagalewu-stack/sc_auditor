@@ -125,6 +125,7 @@ class ScanRequest(BaseModel):
     tools: list[str] | None = None
     config_tier: str = "default"
     mythril_timeout: int = 300
+    halmos_timeout: int = 600
     echidna_timeout: int = 600
     contract_name: str | None = None
 

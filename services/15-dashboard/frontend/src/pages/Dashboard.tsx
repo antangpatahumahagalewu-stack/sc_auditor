@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react';
-import { api, type Audit, type DaemonState, type MetricsSummary, type PipelineStats } from '../lib/api';
+import { api, type Audit, type DaemonState, type MetricsSummary, type PipelineStats, type CaseStatsData } from '../lib/api';
 import { useSSE } from '../hooks/useSSE';
 
 type ModalState = { open: false } | { open: true; loading: boolean; error: string };
@@ -55,6 +55,7 @@ export default function Dashboard() {
   const [auditsLoading, setAuditsLoading] = useState(true);
   const [stats, setStats] = useState<PipelineStats | null>(null);
   const [metrics, setMetrics] = useState<MetricsSummary | null>(null);
+  const [caseStats, setCaseStats] = useState<CaseStatsData | null>(null);
   const [daemon, setDaemon] = useState<DaemonState | null>(null);
   const [daemonToggling, setDaemonToggling] = useState(false);
   const [syncing, setSyncing] = useState(false);
@@ -86,11 +87,12 @@ export default function Dashboard() {
 
     async function load() {
       try {
-        const [auditsRes, statsRes, daemonRes, metricsRes] = await Promise.all([
+        const [auditsRes, statsRes, daemonRes, metricsRes, caseStatsRes] = await Promise.all([
           api.getAudits({ limit: 10 }),
           api.getStats(),
           api.getDaemonStatus(),
           api.getMetrics(),
+          api.getCaseStats(),
         ]);
 
         if (cancelled) return;
@@ -99,6 +101,7 @@ export default function Dashboard() {
         setStats(statsRes.data || null);
         setDaemon(daemonRes.data || null);
         setMetrics(metricsRes.data || null);
+        setCaseStats(caseStatsRes.data || null);
       } catch {
         // leave defaults (loading states)
       } finally {
@@ -312,6 +315,74 @@ export default function Dashboard() {
           </button>
         </div>
       </div>
+
+      {/* ── Case Management Stats ────────────────────── */}
+      {caseStats && (
+        <>
+          <div className="flex items-center justify-between">
+            <h3 className="font-semibold">Case Management</h3>
+            <a href="/cases" className="text-sm text-vyper-400 hover:text-vyper-300 transition-colors">
+              View all cases →
+            </a>
+          </div>
+          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
+            <div className={statCardClass()}>
+              <span className="text-sm dark:text-[#a1a1aa] light:text-[#71717a]">Open Cases</span>
+              <div className="text-3xl font-bold mt-1">{caseStats.open_cases}</div>
+            </div>
+            <div className={statCardClass()}>
+              <span className="text-sm dark:text-[#a1a1aa] light:text-[#71717a]">Closed Cases</span>
+              <div className="text-3xl font-bold mt-1">{caseStats.closed_cases}</div>
+            </div>
+            <div className={statCardClass()}>
+              <span className="text-sm dark:text-[#a1a1aa] light:text-[#71717a]">Avg Confidence</span>
+              <div className="text-3xl font-bold mt-1">{(caseStats.avg_confidence * 100).toFixed(0)}%</div>
+            </div>
+            <div className={statCardClass()}>
+              <span className="text-sm dark:text-[#a1a1aa] light:text-[#71717a]">Total Bounty</span>
+              <div className="text-3xl font-bold mt-1 text-green-400">
+                ${caseStats.total_bounty.toLocaleString()}
+              </div>
+            </div>
+          </div>
+
+          {/* Recent Open Cases in Dashboard */}
+          {caseStats.recent_cases && caseStats.recent_cases.length > 0 && (
+            <div className={statCardClass()}>
+              <h3 className="font-semibold mb-4">Recent Open Cases</h3>
+              <div className="space-y-2">
+                {caseStats.recent_cases.map((c) => (
+                  <a
+                    key={c.case_id}
+                    href={`/cases/${c.case_id}`}
+                    className="flex items-center justify-between py-2 px-3 rounded-lg dark:bg-[#18181b] light:bg-[#f4f4f5] hover:dark:bg-vyper-500/5 hover:light:bg-vyper-500/3 transition-colors"
+                  >
+                    <div className="flex items-center gap-3">
+                      <span className={`w-2 h-2 rounded-full ${
+                        c.severity === 'Critical' ? 'bg-red-500' :
+                        c.severity === 'High' ? 'bg-orange-500' :
+                        c.severity === 'Medium' ? 'bg-yellow-500' : 'bg-green-500'
+                      }`} />
+                      <div>
+                        <div className="text-sm font-medium">{c.title}</div>
+                        <div className="text-xs font-mono dark:text-[#a1a1aa] light:text-[#71717a]">{c.case_id}</div>
+                      </div>
+                    </div>
+                    <div className="flex items-center gap-3">
+                      <span className="text-xs dark:text-[#a1a1aa] light:text-[#71717a]">
+                        {(c.confidence * 100).toFixed(0)}% confidence
+                      </span>
+                      <svg className="w-4 h-4 dark:text-[#a1a1aa] light:text-[#71717a]" viewBox="0 0 20 20" fill="currentColor">
+                        <path fillRule="evenodd" d="M7.293 14.707a1 1 0 010-1.414L10.586 10 7.293 6.707a1 1 0 011.414-1.414l4 4a1 1 0 010 1.414l-4 4a1 1 0 01-1.414 0z" clipRule="evenodd" />
+                      </svg>
+                    </div>
+                  </a>
+                ))}
+              </div>
+            </div>
+          )}
+        </>
+      )}
 
       {/* ── Recent Audits ──────────────────────────── */}
       <div className={statCardClass()}>

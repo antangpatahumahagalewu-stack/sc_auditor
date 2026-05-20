@@ -11,12 +11,13 @@ from __future__ import annotations
 import asyncio
 import sys
 import time
+import uuid
 from contextlib import asynccontextmanager
 from pathlib import Path
 from typing import Any, AsyncGenerator
 
 import structlog
-from fastapi import FastAPI, HTTPException, Request
+from fastapi import FastAPI, HTTPException, Request, Response
 from fastapi.middleware.cors import CORSMiddleware
 
 from src.backup import BackupManager, create_backup_manager
@@ -34,6 +35,9 @@ from src.models import (
     UpdateResult,
 )
 from src.update import UpdateManager, create_update_manager
+
+from prometheus_client import Counter, Gauge, Histogram, generate_latest, REGISTRY
+from prometheus_client.exposition import CONTENT_TYPE_LATEST
 
 # ── Logging ────────────────────────────────────────────────
 

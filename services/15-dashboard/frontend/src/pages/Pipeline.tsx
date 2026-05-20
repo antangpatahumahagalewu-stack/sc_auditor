@@ -88,7 +88,7 @@ export default function Pipeline() {
               {PIPELINE_STAGES.map((stage, i) => {
                 const isActive = i === currentIdx;
                 const isPast = i < currentIdx;
-                const isFuture = i > currentIdx;
+
                 const stageColor = isPast
                   ? 'bg-green-500/20 text-green-400 border-green-500/30'
                   : isActive

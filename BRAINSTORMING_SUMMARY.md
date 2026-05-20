@@ -7,10 +7,10 @@
 
 **⚠️ 17 Mei 2026 — PIVOT: SaaS → Local-First CLI**
 
-Arsitektur awal dirancang sebagai SaaS dengan 14 microservices, PostgreSQL, NATS, Kubernetes. Setelah diskusi, diputuskan:
+Arsitektur awal dirancang sebagai SaaS dengan 14 microservices, NATS, Kubernetes + database terpusat. Setelah diskusi, diputuskan:
 - **Bukan SaaS** → CLI tool personal
 - **Bukan microservices** → 1 Python package modular
-- **Bukan PostgreSQL** → JSON + Markdown files
+- **No database** → JSON + Markdown files (100% file-based)
 - **Bukan NATS** → Direct function calls
 - **Bukan TypeScript** → Python (Hermes native, tools native)
 
@@ -80,7 +80,7 @@ Setelah pivot ke Local-First CLI, arsitektur berubah total dari 14 microservices
 │ │• JWT    │            │• Version │              │• Workflow│        │
 │ │• API key│            │• Teams   │              │• Skill   │        │
 │ ├─────────┤            ├──────────┤              │  Dispatch│        │
-│ │Postgres │            │ Postgres │              ├──────────┤        │
+ │ │JSON Files│            │ JSON Files│              ├──────────┤        │
 │ └─────────┘            └──────────┘              │No State  │        │
 │                                                   └──────────┘        │
 │                                                                        │
@@ -94,8 +94,8 @@ Setelah pivot ke Local-First CLI, arsitektur berubah total dari 14 microservices
 │ │• Echidna│  │• Replay │  │• Scoring│  │• Custom │  │• MD     │     │
 │ │         │  │• Impers │  │• Fix Rec│  │• Known  │  │• Score  │     │
 │ ├─────────┤  ├─────────┤  ├─────────┤  │  Vulns  │  ├─────────┤     │
-│ │Postgres │  │ No Net  │  │Postgres │  ├─────────┤  │ Postgres│     │
-│ └─────────┘  └─────────┘  └─────────┘  │ Postgres│  └─────────┘     │
+│ │JSON Files │  │ No Net  │  │JSON Files │  ├─────────┤  │ JSON Files│     │
+│ └─────────┘  └─────────┘  └─────────┘  │ JSON Files│  └─────────┘     │
 │                                        └─────────┘                   │
 │ ┌─────────┐  ┌─────────┐  ┌─────────┐  ┌─────────┐                  │
 │ │  SKILL  │  │ STORAGE │  │   GAS   │  │ NOTIF   │                  │
@@ -106,7 +106,7 @@ Setelah pivot ke Local-First CLI, arsitektur berubah total dari 14 microservices
 │ │• Custom │  │• S3/Min │  │• Op-Code│  │• Discord│                  │
 │ │         │  │  io     │  │  Analyze│  │• Slack  │                  │
 │ ├─────────┤  ├─────────┤  ├─────────┤  ├─────────┤                  │
-│ │Postgres │  │ Object  │  │ Postgres │  │ Postgres│                  │
+│ │JSON Files │  │ Object  │  │ JSON Files │  │ JSON Files│                  │
 │ └─────────┘  │ Storage │  └─────────┘  └─────────┘                  │
 │              └─────────┘                                             │
 │                                                                      │
@@ -139,19 +139,16 @@ Setelah pivot ke Local-First CLI, arsitektur berubah total dari 14 microservices
 | # | Service | Stack | Data Store | Tanggung Jawab |
 |---|---------|-------|------------|----------------|
 | 1 | **API Gateway** | Kong / Envoy | No state | Auth validation, rate limiting, request routing, API versioning |
-| 2 | **Auth Service** | TypeScript | PostgreSQL | Users, roles, JWT, API keys, RBAC, team management |
-| 3 | **Immunefi Scraper Service** | TypeScript | PostgreSQL + Cache | Sync 234+ Immunefi programs, track changes, detect new contracts, prioritize by bounty |
-| 4 | **Project Service** | TypeScript | PostgreSQL | Audit projects (auto-created dari Immunefi), version tracking, team assignment |
-| 5 | **Orchestrator Service** | TypeScript (dari Opencode lore-master) | No state (event-driven) | Pipeline coordination, skill dispatch, workflow engine, decision tree |
-| 6 | **Static Analysis Service** | Python + Slither/Mythril/Echidna | PostgreSQL + Cache | Static scan execution, vulnerability detection, raw output parsing |
-| 7 | **Exploit Engine** | TypeScript/Go + Anvil | No persistent state (ephemeral) | **WAJIB ISOLATED**, fork mainnet, replay exploit, state manipulation |
-| 8 | **AI Analysis Service** | Python + LLM | PostgreSQL + Vector DB | AI vuln detection, severity scoring, fix recommendation |
-| 9 | **Vulnerability DB Service** | TypeScript | PostgreSQL + Redis | Pattern library, CVE database, known vulns, custom rules |
-| 10 | **Report Service** | TypeScript | PostgreSQL | PDF/HTML/MD report generation, template management, scoring |
-| 11 | **Storage Service** | TypeScript + MinIO/S3 | Object Storage | Source code storage, artifacts, scan results, large files |
-| 12 | **Skill Service** | TypeScript (Hermes skills adapted) | PostgreSQL + File Store | Skill loading & execution, versioning, lifecycle management |
-| 13 | **Gas Optimizer Service** | TypeScript/Python | PostgreSQL | Gas analysis, optimization suggestions, opcode-level profiling |
-| 14 | **Notification Service** | TypeScript | PostgreSQL | Webhooks, email, Slack/Discord alerts, event broadcasting |
+| 2 | **Auth Service** | Python | JSON files | Users, roles, JWT, API keys, RBAC, team management |
+| 3 | **Immunefi Scraper Service** | Python | JSON files + Cache | Sync 234+ Immunefi programs, track changes, detect new contracts, prioritize by bounty |
+| 4 | **Project Service** | Python | JSON files | Audit projects (auto-created dari Immunefi), version tracking, team assignment |
+| 6 | **Static Analysis Service** | Python + Slither/Mythril/Echidna | JSON files + Cache | Static scan execution, vulnerability detection, raw output parsing |
+| 8 | **AI Analysis Service** | Python + LLM | JSON files + Vector | AI vuln detection, severity scoring, fix recommendation |
+| 9 | **Vulnerability DB Service** | Python | JSON files | Pattern library, CVE database, known vulns, custom rules |
+| 10 | **Report Service** | Python | JSON files | PDF/HTML/MD report generation, template management, scoring |
+| 12 | **Skill Service** | Python (Hermes skills adapted) | JSON files + File Store | Skill loading & execution, versioning, lifecycle management |
+| 13 | **Gas Optimizer Service** | Python | JSON files | Gas analysis, optimization suggestions, opcode-level profiling |
+| 14 | **Notification Service** | Python | JSON files | Webhooks, email, Slack/Discord alerts, event broadcasting |
 
 ### 2.3 Immunefi Integration — Sumber Semua Job
 
@@ -601,7 +598,7 @@ Dokumen tersebut mencakup:
 | **Pipeline Orchestration** | ✅ Event-driven | Setiap stage emit event → orchestrator dispatch stage berikutnya |
 | **Exploit Engine Isolation** | ✅ 5 layers | --network=none, cgroups, tmpfs, no secrets, stdout only |
 | **Immunefi Sync Strategy** | ✅ 6-hour full sync | 30-min quick check, on-demand, diff-based detection |
-| **Database per Service** | ✅ Tidak ada shared DB | Masing-masing service punya PostgreSQL sendiri |
+| **Database per Service** | ✅ Tidak ada shared DB | Masing-masing service punya JSON storage sendiri |
 | **Exploit Engine DB** | ✅ No persistent state | All state ephemeral, hasil disimpan oleh Storage Service |
 | **Report Template Default** | ✅ Immunefi Standard | Template markdown siap-submit ke Immunefi |
 | **PoC Generation** | ✅ Wajib untuk critical/high | Exploit Engine output dalam format Hardhat/Foundry |
@@ -628,7 +625,7 @@ Platform mengklasifikasikan setiap finding ke 4 kategori untuk akurasi dan pembe
 | # | Item | Keputusan | Alasan |
 |---|------|-----------|--------|
 | 1 | **Arsitektur** | ✅ **Microservice** (Docker Compose) | 12 service independen, HTTP/REST, isolasi + scale per service |
-| 2 | **Storage** | ✅ **JSON + Markdown** (per-service volume) | File-based di volume Docker. No PostgreSQL, no CSV |
+| 2 | **Storage** | ✅ **JSON + Markdown** (per-service volume) | File-based di volume Docker. No database, no CSV |
 | 3 | **Bahasa** | ✅ **Python 3.11+** (semua service) | Hermes native, Slither/Mythril/Echidna semua Python |
 | 4 | **Blockchain** | ✅ **EVM** (Ethereum + L2s) | 90% Immunefi EVM, tools mature |
 | 5 | **Orchestrator** | ✅ **Workflow Engine** (async state machine) | 9 state, saga pattern, retry 3x, compensating actions |

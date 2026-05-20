@@ -131,21 +131,37 @@ class HalmosRunner:
         project_dir = self._work_dir / audit_id
         findings: list[HalmosFinding] = []
         errors: list[str] = []
+        effective_timeout = timeout
 
         try:
             # Write sources to temp project directory
             self._write_sources(project_dir, sources)
 
+            # ── Large contract detection ───────────────────────
+            timeout_multiplier, size_error = self._check_contract_size(project_dir)
+            if size_error:
+                log.warning("halmos.contract_too_large", error=size_error)
+                return HalmosResult(success=False, findings=findings, errors=[size_error])
+
+            effective_timeout = int(timeout * timeout_multiplier)
+            if timeout_multiplier > 1:
+                log.info(
+                    "halmos.timeout_adjusted",
+                    original=timeout,
+                    effective=effective_timeout,
+                    multiplier=timeout_multiplier,
+                )
+
             # Step 1: forge build
             log.info("halmos.forge_build.start", project=str(project_dir))
-            build_ok = self._run_forge_build(project_dir, timeout)
+            build_ok = self._run_forge_build(project_dir, effective_timeout)
             if not build_ok:
                 errors.append("Forge build failed — check source code for compilation errors")
                 return HalmosResult(success=False, findings=findings, errors=errors)
 
             # Step 2: halmos
             log.info("halmos.run.start", project=str(project_dir), function=function)
-            halmos_output = self._run_halmos(project_dir, timeout // 2, function)
+            halmos_output = self._run_halmos(project_dir, effective_timeout // 2, function)
 
             # Step 3: Parse output
             parsed = self._parse_output(halmos_output)
@@ -169,6 +185,14 @@ class HalmosRunner:
                 statistics=stats,
             )
 
+        except subprocess.TimeoutExpired:
+            log.warning("halmos.timeout", timeout=effective_timeout)
+            return HalmosResult(
+                success=False,
+                findings=findings,
+                errors=[f"Halmos timeout after {effective_timeout}s"],
+                statistics={"total_tests": 0, "num_passed": 0, "num_failed": 0, "total_time": effective_timeout},
+            )
         except Exception as exc:
             log.exception("halmos.run.failed", error=str(exc))
             return HalmosResult(
@@ -322,6 +346,43 @@ class HalmosRunner:
             stats["total_time"] = sum(t.get("time", 0) for t in tests)
 
         return {"findings": findings, "errors": errors, "statistics": stats}
+
+    def _check_contract_size(self, project_dir: Path) -> tuple[float, str | None]:
+        """Check total size of Solidity files in project directory.
+
+        Returns:
+            Tuple of (timeout_multiplier, error_message).
+            If error_message is not None, execution should abort:
+            - > 10 MB → warning, timeout doubled
+            - > 50 MB → abort with error
+        """
+        total_size = 0
+        try:
+            for fpath in project_dir.rglob("*.sol"):
+                try:
+                    total_size += fpath.stat().st_size
+                except OSError:
+                    continue
+        except OSError:
+            return 1.0, None
+
+        total_mb = total_size / (1024 * 1024)
+
+        if total_mb > 50:
+            return 1.0, (
+                f"Contract too large for symbolic execution "
+                f"({total_mb:.1f} MB > 50 MB limit)"
+            )
+
+        if total_mb > 10:
+            log.warning(
+                "halmos.large_contract",
+                size_mb=round(total_mb, 1),
+                timeout_multiplier=2.0,
+            )
+            return 2.0, None
+
+        return 1.0, None
 
     def check_available(self) -> tuple[bool, str | None]:
         """Check if halmos is available and return version."""

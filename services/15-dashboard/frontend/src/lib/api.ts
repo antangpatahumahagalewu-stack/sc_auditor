@@ -188,4 +188,99 @@ export const api = {
   },
   getTeamSession: (sessionId: string) => request<ApiResponse>(`/api/agent/team/${sessionId}`),
   getAgentSkills: () => request<ApiResponse>('/api/agent/skills'),
+  getAgentSkillMetrics: () => request<ApiResponse>('/api/agent/skills/metrics'),
+  getMemoryStats: () => request<ApiResponse>('/api/agent/memory/stats'),
+  memorySearch: (query: string, store: string = 'vector') =>
+    request<ApiResponse>('/api/agent/memory/search', {
+      method: 'POST',
+      body: JSON.stringify({ query, store, limit: 20 }),
+    }),
+  startDaemon: () => request<ApiResponse>('/api/agent/daemon/start', { method: 'POST' }),
+  stopDaemon: () => request<ApiResponse>('/api/agent/daemon/stop', { method: 'POST' }),
+  getAgentDaemonStatus: () => request<ApiResponse>('/api/agent/daemon/status'),
+  submitFeedback: (body: { session_id: string; rating: number; comment?: string; tags?: string[] }) =>
+    request<ApiResponse>('/api/agent/learning/feedback', { method: 'POST', body: JSON.stringify(body) }),
+  getLearningStats: () => request<ApiResponse>('/api/agent/learning/stats'),
+  getLearningRecommendations: (taskType?: string) =>
+    request<ApiResponse>(`/api/agent/learning/recommendations${taskType ? `?task_type=${taskType}` : ''}`),
+
+  // ── Cases (Agenda 05: Each Bug Is Cases) ──────────────
+  getCases: (params?: { status?: string; search?: string; severity?: string; confidence?: string; sort?: string; order?: string; limit?: number; offset?: number }) => {
+    const qs = new URLSearchParams();
+    if (params?.status) qs.set('status', params.status);
+    if (params?.search) qs.set('search', params.search);
+    if (params?.severity) qs.set('severity', params.severity);
+    if (params?.confidence) qs.set('confidence', params.confidence);
+    if (params?.sort) qs.set('sort', params.sort);
+    if (params?.order) qs.set('order', params.order);
+    if (params?.limit) qs.set('limit', String(params.limit));
+    if (params?.offset) qs.set('offset', String(params.offset));
+    const q = qs.toString();
+    return request<ApiResponse<VpCase[]>>(`/api/cases${q ? '?' + q : ''}`);
+  },
+  getArchive: (params?: { search?: string; sort?: string; order?: string; limit?: number; offset?: number }) => {
+    const qs = new URLSearchParams();
+    if (params?.search) qs.set('search', params.search);
+    if (params?.sort) qs.set('sort', params.sort);
+    if (params?.order) qs.set('order', params.order);
+    if (params?.limit) qs.set('limit', String(params.limit));
+    if (params?.offset) qs.set('offset', String(params.offset));
+    const q = qs.toString();
+    return request<ApiResponse<VpCase[]>>(`/api/cases/archive${q ? '?' + q : ''}`);
+  },
+  getCase: (caseId: string) => request<ApiResponse<VpCase>>(`/api/cases/${caseId}`),
+  getCaseStats: () => request<ApiResponse<CaseStatsData>>('/api/cases/stats'),
+  createCase: (body: {
+    project: string; scanners: { name: string; detector: string; confidence: number }[];
+    severity?: string; title: string; contract?: string; function?: string; line?: number;
+    description?: string; recommendation?: string; proof_of_concept?: string; platform?: string;
+  }) => request<ApiResponse<VpCase>>('/api/cases', { method: 'POST', body: JSON.stringify(body) }),
+  closeCase: (caseId: string, body: { closed_reason: string; bounty_amount?: number; notes?: string }) =>
+    request<ApiResponse<VpCase>>(`/api/cases/${caseId}/close`, { method: 'PUT', body: JSON.stringify(body) }),
+  getCaseReportMdUrl: (caseId: string) => `/api/cases/${caseId}/report.md`,
+  getCaseReportPdfUrl: (caseId: string) => `/api/cases/${caseId}/report.pdf`,
 };
+
+// ── Case Types (Agenda 05) ─────────────────────────────────────
+export interface VpScannerFinding {
+  name: string;
+  detector: string;
+  confidence: number;
+}
+
+export interface VpCase {
+  case_id: string;
+  status: 'OPEN' | 'CLOSED';
+  project: string;
+  scanners: VpScannerFinding[];
+  confidence: number;
+  confidence_label: string;
+  confidence_factors: string[];
+  scanner_count: number;
+  severity: string;
+  title: string;
+  contract: string;
+  function: string;
+  line: number;
+  description: string;
+  recommendation: string;
+  proof_of_concept: string;
+  platform: string;
+  bounty_amount: number | null;
+  notes: string;
+  created_at: string;
+  closed_at: string | null;
+  closed_reason: string | null;
+}
+
+export interface CaseStatsData {
+  total_cases: number;
+  open_cases: number;
+  closed_cases: number;
+  total_bounty: number;
+  avg_confidence: number;
+  by_severity: Record<string, number>;
+  by_scanner: Record<string, number>;
+  label_distribution: Record<string, number>;
+  recent_cases: VpCase[];
+}

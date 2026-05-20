@@ -182,95 +182,21 @@ class EtherscanChainProvider:
         )
 ```
 
-### 3.2 Database Upgrade: SQLite → PostgreSQL
+### 3.2 Enhanced JSON Storage (Opsi B)
 
-```sql
--- Main contracts table
-CREATE TABLE contracts (
-    id                  SERIAL PRIMARY KEY,
-    chain               TEXT NOT NULL,
-    address             TEXT NOT NULL,
-    checksum_address    TEXT,
-    name                TEXT,
-    
-    -- Source metadata
-    compiler_version    TEXT,
-    license             TEXT,
-    provider            TEXT,
-    constructor_args    TEXT,
-    
-    -- Enriched metadata
-    abi                 JSONB,
-    bytecode            TEXT,
-    bytecode_hash       TEXT,      -- Keccak256(bytecode) untuk verifikasi
-    source_hash         TEXT,      -- Keccak256(source) untuk tracking changes
-    
-    -- Stats
-    lines_of_code       INT DEFAULT 0,
-    file_count          INT DEFAULT 0,
-    
-    -- Audit trail
-    first_fetched_at    TIMESTAMPTZ DEFAULT NOW(),
-    last_fetched_at     TIMESTAMPTZ DEFAULT NOW(),
-    fetch_count         INT DEFAULT 1,
-    
-    UNIQUE(chain, address)
-);
+> **Keputusan**: Mengganti SQL database dengan Enhanced JSON file-based storage.
+> Lihat `VYPER.md` §3a untuk filosofi — JSON files lebih sederhana, zero dependency,
+> portable, dan lebih cepat untuk read-heavy workload seperti source cache.
 
--- Source files (one per contract file)
-CREATE TABLE source_files (
-    id                  SERIAL PRIMARY KEY,
-    contract_id         INT REFERENCES contracts(id) ON DELETE CASCADE,
-    filename            TEXT NOT NULL,
-    content             TEXT NOT NULL,
-    content_hash        TEXT,      -- Untuk deduplikasi
-    line_count          INT DEFAULT 0,
-    UNIQUE(contract_id, filename)
-);
+Pengganti SQL table dengan JSON files:
 
--- Historical versions (track upgrades)
-CREATE TABLE contract_versions (
-    id                  SERIAL PRIMARY KEY,
-    contract_id         INT REFERENCES contracts(id) ON DELETE CASCADE,
-    source_version      INT NOT NULL,  -- Increment per change
-    bytecode_hash       TEXT,
-    source_hash         TEXT,
-    block_number        BIGINT,        -- Block where this version was deployed
-    tx_hash             TEXT,          -- Deployment transaction
-    detected_at         TIMESTAMPTZ DEFAULT NOW(),
-    UNIQUE(contract_id, source_version)
-);
-
--- Dependencies (import graph)
-CREATE TABLE contract_dependencies (
-    id                  SERIAL PRIMARY KEY,
-    contract_id         INT REFERENCES contracts(id) ON DELETE CASCADE,
-    dependency_address  TEXT NOT NULL,
-    dependency_chain    TEXT NOT NULL,
-    import_path         TEXT,
-    is_direct           BOOLEAN DEFAULT TRUE,
-    UNIQUE(contract_id, dependency_chain, dependency_address)
-);
-
--- Full-text search index
-CREATE INDEX idx_contracts_search ON contracts USING GIN(
-    to_tsvector('english', name || ' ' || COALESCE(abi::text, ''))
-);
-
--- Cache invalidation tracking
-CREATE TABLE fetch_queue (
-    id                  SERIAL PRIMARY KEY,
-    chain               TEXT NOT NULL,
-    address             TEXT NOT NULL,
-    priority            INT DEFAULT 5,   -- 1 (highest) to 10 (lowest)
-    status              TEXT DEFAULT 'pending',  -- pending/running/completed/failed
-    scheduled_at        TIMESTAMPTZ DEFAULT NOW(),
-    started_at          TIMESTAMPTZ,
-    completed_at        TIMESTAMPTZ,
-    error               TEXT,
-    UNIQUE(chain, address)
-);
-```
+| SQL Table | Enhanced JSON Equivalent |
+|-----------|-------------------------|
+| `contracts` | `metadata.json` per contract + indexes (`by_chain.json`, `by_provider.json`, `by_compiler.json`) |
+| `source_files` | `sources/*.sol` files per contract directory |
+| `contract_versions` | `history/{chain}_{address}.jsonl` (JSON Lines append-only) |
+| `contract_dependencies` | Resolved on-the-fly by `DependencyResolver` |
+| `fetch_queue` | Tidak perlu — fetch langsung sinkron |
 
 ### 3.3 Compiler Verification Engine
 
@@ -1203,7 +1129,7 @@ async def get_bytecode_stats():
 Minggu 1 (Foundation)          Minggu 3 (Autonomous)
 ┌────────────────┐            ┌────────────────┐
 │ 10+ providers   │            │ Block monitor   │
-│ PostgreSQL      │            │ Cache warming   │
+│ Enhanced JSON   │            │ Cache warming   │
 │ Compiler verify │            │ Exploit integ   │
 │ Batch fetch     │            │ New endpoints   │
 └────────┬───────┘            └────────┬───────┘
@@ -1222,7 +1148,7 @@ Minggu 2 (Intelligence)       Minggu 4 (God-Tier)
 
 | Level | Story Points | Man-Days | Key Deliverables |
 |-------|-------------|----------|------------------|
-| Level 1 | 34 SP | 15-18 | 10+ providers, PostgreSQL, compiler verify |
+| Level 1 | 34 SP | 15-18 | 10+ providers, Enhanced JSON, compiler verify |
 | Level 2 | 55 SP | 25-30 | ABI extraction, dependency graph, upgrade detection |
 | Level 3 | 55 SP | 25-30 | Block monitor, cache warming, auto-exploit |
 | Level 4 | 89 SP | 40-50 | Bytecode repo, AI reconstruction, predictive |

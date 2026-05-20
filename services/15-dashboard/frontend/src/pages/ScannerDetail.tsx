@@ -49,6 +49,14 @@ export default function ScannerDetail() {
     }
   }
 
+  const toolTypes: Record<string, string> = {
+    slither: 'static',
+    mythril: 'symbolic',
+    echidna: 'fuzzer',
+    forge: 'compiler',
+    halmos: 'formal verification',
+  };
+
   const statusDot = (status: string) => {
     switch (status) {
       case 'healthy': return 'bg-green-500 shadow-[0_0_6px_rgba(34,197,94,0.5)]';
@@ -82,7 +90,12 @@ export default function ScannerDetail() {
             {Object.entries(tools).map(([name, info]) => (
               <div key={name} className="flex items-center gap-3 p-3 rounded-lg dark:bg-[#18181b] light:bg-[#f4f4f5] dark:border dark:border-[#27272a] light:border light:border-[#e4e4e7]">
                 <span className={`w-2.5 h-2.5 rounded-full ${statusDot(info.status)}`} />
-                <span className="font-medium text-sm flex-1">{name}</span>
+                <div className="flex items-center gap-2 flex-1 min-w-0">
+                  <span className="font-medium text-sm truncate">{name}</span>
+                  {toolTypes[name] && (
+                    <span className="text-xs dark:text-[#a1a1aa] italic">{toolTypes[name]}</span>
+                  )}
+                </div>
                 <span className={`text-xs px-2 py-0.5 rounded-full font-medium ${
                   info.status === 'healthy' ? 'bg-green-500/20 text-green-400' : 'bg-red-500/20 text-red-400'
                 }`}>{info.status}</span>
@@ -91,6 +104,35 @@ export default function ScannerDetail() {
           </div>
         )}
       </div>
+
+      {/* Halmos Info */}
+      {tools && 'halmos' in tools && (
+        <div className={statCardClass()}>
+          <div className="flex items-start gap-3">
+            <div className="w-8 h-8 rounded-lg flex items-center justify-center shrink-0 dark:bg-[#18181b] light:bg-[#f4f4f5] dark:border dark:border-[#27272a] light:border light:border-[#e4e4e7]">
+              <svg className="w-4 h-4 dark:text-[#a1a1aa] light:text-[#71717a]" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                <path strokeLinecap="round" strokeLinejoin="round" d="M13 10V3L4 14h7v7l9-11h-7z" />
+              </svg>
+            </div>
+            <div className="flex-1 min-w-0">
+              <div className="flex items-center gap-2 flex-wrap">
+                <h4 className="font-medium text-sm">Halmos — Formal Verification Engine</h4>
+                <span className={`text-xs px-2 py-0.5 rounded-full font-medium ${
+                  tools.halmos?.status === 'healthy'
+                    ? 'bg-green-500/20 text-green-400'
+                    : 'bg-gray-500/20 text-gray-400'
+                }`}>{tools.halmos?.status || 'unreachable'}</span>
+              </div>
+              <p className="text-xs dark:text-[#a1a1aa] light:text-[#71717a] mt-1">
+                Mathematically proves contract correctness — beyond static analysis
+              </p>
+              {tools.halmos?.status !== 'healthy' && (
+                <p className="text-xs text-gray-500 mt-1 italic">Halmos service not running</p>
+              )}
+            </div>
+          </div>
+        </div>
+      )}
 
       {/* Fetch Results */}
       <div className={statCardClass()}>

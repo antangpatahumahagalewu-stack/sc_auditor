@@ -46,6 +46,10 @@ from src.slither import SlitherRunner, create_slither_runner
 from src.slither_config import SlitherConfigBuilder, create_slither_config
 from src.solc_manager import SolcManager, create_solc_manager
 
+from fastapi import Response
+from prometheus_client import Counter, Gauge, Histogram, generate_latest, REGISTRY
+from prometheus_client.exposition import CONTENT_TYPE_LATEST
+
 # ── Logging ────────────────────────────────────────────────
 
 structlog.configure(
@@ -80,6 +84,9 @@ TOOLS_DIR = DATA_DIR / "tools"
 # Mythril sidecar URL (set via env, defaults to localhost for testing)
 MYTHRIL_URL = os.getenv("MYTHRIL_URL", "http://localhost:8013")
 
+# Halmos sidecar URL (set via env, defaults to Docker compose service name)
+HALMOS_URL = os.getenv("HALMOS_URL", "http://04d-scanner-halmos:8017")
+
 # ── Global state ───────────────────────────────────────────
 
 
@@ -94,6 +101,8 @@ class AppState:
         self.dep_resolver: DependencyResolver = create_dependency_resolver()
         self.mythril_available: bool = False
         self.mythril_version: str | None = None
+        self.halmos_available: bool = False
+        self.halmos_version: str | None = None
         self._shutdown_requested: bool = False
 
     @property
@@ -158,6 +167,44 @@ app.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"],
 )
+
+
+# ── Metrics ────────────────────────────────────────────────────
+_request_count = Counter("vyper_request_count", "Total requests", ["service", "method", "endpoint", "status"])
+_request_duration = Histogram("vyper_request_duration_seconds", "Request latency", ["service", "method", "endpoint"], buckets=(0.01, 0.05, 0.1, 0.5, 1.0, 2.0, 5.0, 10.0))
+_error_count = Counter("vyper_error_count", "Total errors", ["service", "method", "endpoint", "error_type"])
+_service_info = Gauge("vyper_service_info", "Service metadata", ["service", "version"])
+_service_info.labels("04-scanner", "1.0.0").set(1)
+
+@app.middleware("http")
+async def metrics_middleware(request: Request, call_next):
+    if request.url.path == "/metrics":
+        return await call_next(request)
+    method = request.method
+    path = request.url.path
+    start = time.monotonic()
+    try:
+        response = await call_next(request)
+        _request_count.labels("04-scanner", method, path, str(response.status_code)).inc()
+        _request_duration.labels("04-scanner", method, path).observe(time.monotonic() - start)
+        if response.status_code >= 500:
+            _error_count.labels("04-scanner", method, path, "server_error").inc()
+        return response
+    except Exception as e:
+        _request_count.labels("04-scanner", method, path, "500").inc()
+        _error_count.labels("04-scanner", method, path, type(e).__name__).inc()
+        raise
+
+@app.get("/metrics", include_in_schema=False)
+async def metrics_endpoint() -> Response:
+    return Response(content=generate_latest(REGISTRY), media_type=CONTENT_TYPE_LATEST)
+
+@app.middleware("http")
+async def trace_middleware(request: Request, call_next):
+    trace_id = request.headers.get("X-Trace-ID", uuid.uuid4().hex[:12])
+    response = await call_next(request)
+    response.headers["X-Trace-ID"] = trace_id
+    return response
 
 
 # ── Helper ─────────────────────────────────────────────────
@@ -420,6 +467,7 @@ async def get_scan_result(audit_id: str) -> ApiResponse:
 SUPPORTED_TOOLS: dict[str, str] = {
     "slither": "static",
     "mythril": "symbolic",
+    "halmos": "symbolic",
     "echidna": "fuzzer",
     "forge": "compiler",
 }
@@ -497,6 +545,44 @@ async def _detect_tools(state: AppState) -> list[ToolInfo]:
         results.append(
             ToolInfo(
                 name="mythril",
+                available=False,
+                type="symbolic",
+            )
+        )
+
+    # Check halmos via HTTP (sidecar — 04d-scanner-halmos)
+    try:
+        async with httpx.AsyncClient(timeout=5) as client:
+            resp = await client.get(f"{HALMOS_URL}/health")
+            if resp.status_code == 200:
+                data = resp.json()
+                halmos_ok = data.get("data", {}).get("halmos_available", False)
+                halmos_ver = data.get("data", {}).get("halmos_version")
+                state.halmos_available = halmos_ok
+                state.halmos_version = halmos_ver
+                results.append(
+                    ToolInfo(
+                        name="halmos",
+                        version=halmos_ver,
+                        available=halmos_ok,
+                        type="symbolic",
+                    )
+                )
+            else:
+                state.halmos_available = False
+                results.append(
+                    ToolInfo(
+                        name="halmos",
+                        available=False,
+                        type="symbolic",
+                    )
+                )
+    except (httpx.RequestError, httpx.TimeoutException, Exception):
+        log.warning("halmos_sidecar_unreachable", url=HALMOS_URL)
+        state.halmos_available = False
+        results.append(
+            ToolInfo(
+                name="halmos",
                 available=False,
                 type="symbolic",
             )
@@ -624,6 +710,18 @@ async def _install_tool(tool: str) -> InstallResult:
                 ),
             )
 
+        elif tool == "halmos":
+            # Halmos runs in an isolated sidecar (04d-scanner-halmos).
+            # Cannot install from here — the sidecar Docker image must be rebuilt.
+            return InstallResult(
+                tool=tool,
+                success=False,
+                error=(
+                    "Halmos runs in the '04d-scanner-halmos' sidecar service. "
+                    "Rebuild and restart the container to update."
+                ),
+            )
+
         else:
             return InstallResult(
                 tool=tool,
@@ -736,6 +834,81 @@ def _run_single_tool(
                 tool="mythril",
                 success=False,
                 error=f"Mythril execution error: {str(exc)[:300]}",
+            )
+
+    elif tool == "halmos":
+        # Halmos runs in the 04d-scanner-halmos sidecar (HTTP proxy)
+        try:
+            # Build the sources dict from audit directory
+            sources: dict[str, str] = {}
+            for sol_file in sorted(audit_dir.rglob("*.sol")):
+                rel_path = sol_file.relative_to(audit_dir)
+                sources[str(rel_path)] = sol_file.read_text(encoding="utf-8")
+
+            with httpx.Client(timeout=body.halmos_timeout or 600) as client:
+                resp = client.post(
+                    f"{HALMOS_URL}/analyze",
+                    json={
+                        "sources": sources,
+                        "compiler_version": body.compiler,
+                        "timeout": body.halmos_timeout or 600,
+                    },
+                )
+                if resp.status_code == 200:
+                    data = resp.json()
+                    # Check if the sidecar reported success
+                    if not data.get("ok", True):
+                        return ToolResult(
+                            tool="halmos",
+                            success=False,
+                            error=data.get("error", "Halmos sidecar returned ok=false"),
+                        )
+                    halmos_data = data.get("data") or {}
+                    findings_raw = halmos_data.get("findings", [])
+                    errors = halmos_data.get("errors", [])
+
+                    findings = []
+                    for f in findings_raw:
+                        swc_id = f.get("swc_id")
+                        swc_title = f.get("swc_title", "")
+                        desc = f.get("description", "")
+                        if swc_title and swc_title not in desc:
+                            desc = f"[{swc_title}] {desc}" if desc else swc_title
+                        findings.append(
+                            Finding(
+                                title=f.get("title", "Unknown"),
+                                description=desc,
+                                severity=f.get("severity", "Medium").lower(),
+                                tool="halmos",
+                                swc_id=swc_id,
+                                function=f.get("function"),
+                                line=f.get("address"),
+                            )
+                        )
+
+                    return ToolResult(
+                        tool="halmos",
+                        success=True,
+                        findings=findings,
+                        errors=errors,
+                    )
+                else:
+                    return ToolResult(
+                        tool="halmos",
+                        success=False,
+                        error=f"Halmos service returned {resp.status_code}: {resp.text[:500]}",
+                    )
+        except httpx.RequestError as exc:
+            return ToolResult(
+                tool="halmos",
+                success=False,
+                error=f"Halmos sidecar unreachable: {str(exc)[:200]}",
+            )
+        except Exception as exc:
+            return ToolResult(
+                tool="halmos",
+                success=False,
+                error=f"Halmos execution error: {str(exc)[:300]}",
             )
 
     else:

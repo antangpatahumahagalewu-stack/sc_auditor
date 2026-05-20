@@ -740,304 +740,83 @@ NATS STREAMS: scauditor_audit_pipeline
 
 ## 3. Database Schema per Service
 
-### 3.1 Auth Service — PostgreSQL
+### 3.1 Auth Service — JSON Storage
 
-```sql
--- ============================================================
--- AUTH SERVICE: users, roles, api_keys, sessions
--- ============================================================
+> Sesuai VYPER.md §3a — 100% JSON file-based, zero SQL.
 
-CREATE TABLE users (
-  id              UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-  email           VARCHAR(255) UNIQUE NOT NULL,
-  password_hash   VARCHAR(255) NOT NULL,
-  display_name    VARCHAR(100) NOT NULL,
-  email_verified  BOOLEAN DEFAULT false,
-  mfa_enabled     BOOLEAN DEFAULT false,
-  mfa_secret      VARCHAR(64),          -- encrypted TOTP secret
-  avatar_url      TEXT,
-  created_at      TIMESTAMPTZ DEFAULT now(),
-  updated_at      TIMESTAMPTZ DEFAULT now(),
-  deleted_at      TIMESTAMPTZ           -- soft delete
-);
-
-CREATE TABLE roles (
-  id              UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-  name            VARCHAR(50) UNIQUE NOT NULL,  -- admin, hunter, viewer
-  description     TEXT,
-  is_system       BOOLEAN DEFAULT false,         -- cannot be deleted
-  created_at      TIMESTAMPTZ DEFAULT now()
-);
-
-CREATE TABLE user_roles (
-  user_id         UUID REFERENCES users(id) ON DELETE CASCADE,
-  role_id         UUID REFERENCES roles(id) ON DELETE CASCADE,
-  assigned_by     UUID REFERENCES users(id),
-  assigned_at     TIMESTAMPTZ DEFAULT now(),
-  PRIMARY KEY (user_id, role_id)
-);
-
-CREATE TABLE permissions (
-  id              UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-  name            VARCHAR(100) UNIQUE NOT NULL,  -- project:create, audit:start
-  description     TEXT,
-  resource_type   VARCHAR(50)                    -- project, audit, report, etc.
-);
-
-CREATE TABLE role_permissions (
-  role_id         UUID REFERENCES roles(id) ON DELETE CASCADE,
-  permission_id   UUID REFERENCES permissions(id) ON DELETE CASCADE,
-  PRIMARY KEY (role_id, permission_id)
-);
-
-CREATE TABLE api_keys (
-  id              UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-  user_id         UUID REFERENCES users(id) ON DELETE CASCADE,
-  name            VARCHAR(100) NOT NULL,
-  key_hash        VARCHAR(255) NOT NULL,        -- hashed API key
-  key_prefix      VARCHAR(8) NOT NULL,          -- first 8 chars for identification
-  scopes          TEXT[] DEFAULT '{}',          -- array of permission names
-  expires_at      TIMESTAMPTZ,
-  last_used_at    TIMESTAMPTZ,
-  is_revoked      BOOLEAN DEFAULT false,
-  created_at      TIMESTAMPTZ DEFAULT now()
-);
-
-CREATE TABLE sessions (
-  id              UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-  user_id         UUID REFERENCES users(id) ON DELETE CASCADE,
-  refresh_token   VARCHAR(255) UNIQUE NOT NULL,
-  ip_address      INET,
-  user_agent      TEXT,
-  expires_at      TIMESTAMPTZ NOT NULL,
-  is_revoked      BOOLEAN DEFAULT false,
-  created_at      TIMESTAMPTZ DEFAULT now()
-);
-
-CREATE TABLE audit_log (
-  id              UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-  user_id         UUID REFERENCES users(id),
-  action          VARCHAR(50) NOT NULL,         -- login, api_key_created, role_changed
-  resource_type   VARCHAR(50),
-  resource_id     VARCHAR(100),
-  details         JSONB,
-  ip_address      INET,
-  created_at      TIMESTAMPTZ DEFAULT now()
-);
-
--- Indexes
-CREATE INDEX idx_users_email ON users(email) WHERE deleted_at IS NULL;
-CREATE INDEX idx_api_keys_user ON api_keys(user_id) WHERE is_revoked = false;
-CREATE INDEX idx_sessions_user ON sessions(user_id) WHERE is_revoked = false;
-CREATE INDEX idx_audit_log_user ON audit_log(user_id, created_at DESC);
-CREATE INDEX idx_audit_log_action ON audit_log(action, created_at DESC);
+```json
+/data/auth/
+├── users/{user_id}.json              # Per-user data
+│       { "id": "uuid", "email": "...", "display_name": "...",
+│         "password_hash": "...", "email_verified": true,
+│         "mfa_enabled": false, "avatar_url": null,
+│         "created_at": "...", "updated_at": "...", "deleted_at": null }
+├── roles.json                        # All roles in one file
+├── api_keys/{user_id}/{key_id}.json  # Per-API key
+├── sessions/{token_hash}.json        # Per-session
+├── audit_log/{date}.jsonl            # JSON Lines append-only
+├── indexes/
+│   ├── by_email.json                 # email → user_id mapping
+│   ├── by_role.json                  # role → [user_id, ...]
+│   └── by_user.json                  # user_id → [role_id, ...]
+└── _meta.json                        # Schema version, stats
 ```
 
-### 3.2 Immunefi Scraper Service — PostgreSQL
+### 3.2 Immunefi Scraper Service — JSON Storage
 
-```sql
--- ============================================================
--- IMMUNEFI SCRAPER SERVICE: programs, contracts, sync state
--- ============================================================
-
-CREATE TABLE immunefi_programs (
-  id              UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-  slug            VARCHAR(100) UNIQUE NOT NULL,
-  name            VARCHAR(255) NOT NULL,
-  logo_url        TEXT,
-  website         TEXT,
-  -- Bounty info
-  max_bounty_usd  NUMERIC(16, 2),
-  reward_type     VARCHAR(20),                  -- USDC, ETH, etc.
-  reward_details  JSONB,
-  -- Requirements
-  kyc_required    BOOLEAN DEFAULT false,
-  poc_required    TEXT[] DEFAULT '{}',          -- severity levels requiring PoC
-  -- Status
-  status          VARCHAR(20) DEFAULT 'active', -- active, paused, closed
-  -- Metadata
-  added_at        TIMESTAMPTZ,
-  last_updated    TIMESTAMPTZ,
-  -- Features
-  features        TEXT[] DEFAULT '{}',
-  safe_harbor     TEXT,
-  -- References
-  previous_audits TEXT[] DEFAULT '{}',
-  known_issues    TEXT[] DEFAULT '{}',
-  -- Internal
-  is_archived     BOOLEAN DEFAULT false,
-  created_at      TIMESTAMPTZ DEFAULT now(),
-  synced_at       TIMESTAMPTZ
-);
-
-CREATE TABLE immunefi_contracts (
-  id              UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-  program_id      UUID REFERENCES immunefi_programs(id) ON DELETE CASCADE,
-  address         VARCHAR(42) NOT NULL,         -- 0x...
-  chain           VARCHAR(20) NOT NULL,         -- ethereum, arbitrum, etc.
-  name            VARCHAR(255),
-  description     TEXT,
-  asset_type      VARCHAR(30) DEFAULT 'smart_contract',
-  etherscan_url   TEXT,
-  -- Source code status
-  source_type     VARCHAR(20) DEFAULT 'unknown',-- verified, unverified, proxy, unknown
-  is_verified     BOOLEAN DEFAULT false,
-  -- Audit status
-  audit_status    VARCHAR(20) DEFAULT 'pending',-- pending, scanning, done, error
-  last_scan_id    UUID,
-  -- Timestamps
-  created_at      TIMESTAMPTZ DEFAULT now(),
-  synced_at       TIMESTAMPTZ,
-  -- Unique per chain+address
-  UNIQUE (chain, address)
-);
-
-CREATE TABLE sync_history (
-  id              UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-  status          VARCHAR(20) NOT NULL,         -- running, completed, failed
-  total_programs  INTEGER,
-  updated_programs INTEGER,
-  new_programs    INTEGER,
-  closed_programs INTEGER,
-  total_contracts INTEGER,
-  new_contracts   INTEGER,
-  error_message   TEXT,
-  duration_ms     INTEGER,
-  triggered_by    VARCHAR(50),                  -- cron, manual, webhook
-  started_at      TIMESTAMPTZ NOT NULL,
-  completed_at    TIMESTAMPTZ
-);
-
--- Indexes
-CREATE INDEX idx_contracts_program ON immunefi_contracts(program_id);
-CREATE INDEX idx_contracts_chain ON immunefi_contracts(chain);
-CREATE INDEX idx_contracts_status ON immunefi_contracts(audit_status);
-CREATE INDEX idx_programs_bounty ON immunefi_programs(max_bounty_usd DESC) WHERE status = 'active';
-CREATE INDEX idx_programs_status ON immunefi_programs(status);
+```json
+/data/immunefi/
+├── programs/{slug}.json              # Per-program
+│       { "slug": "...", "name": "...", "max_bounty_usd": 1000000,
+│         "reward_type": "USDC", "status": "active",
+│         "features": [...], "safe_harbor": "...",
+│         "added_at": "...", "last_updated": "..." }
+├── contracts/{chain}_{address}.json  # Per-contract
+├── history/{slug}.jsonl              # JSON Lines append-only
+├── sync_log.jsonl                    # Sync history (JSON Lines)
+├── indexes/
+│   ├── by_chain.json                 # chain → [slug, ...]
+│   ├── by_status.json                # status → [slug, ...]
+│   ├── by_bounty.json                # range → [slug, ...]
+│   └── by_recent.json                # ordered by last_updated
+└── _meta.json                        # Schema version, last synced
 ```
 
-### 3.3 Project Service — PostgreSQL
+### 3.3 Project Service — JSON Storage
 
-```sql
--- ============================================================
--- PROJECT SERVICE: audit projects (auto-created from Immunefi)
--- ============================================================
-
-CREATE TABLE projects (
-  id              UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-  immunefi_program_id UUID REFERENCES immunefi_scraper.immunefi_programs(id),
-  name            VARCHAR(255) NOT NULL,
-  description     TEXT,
-  chain           VARCHAR(20) NOT NULL,
-  owner_id        UUID,                         -- user who owns this
-  team_members    UUID[] DEFAULT '{}',          -- user IDs
-  status          VARCHAR(20) DEFAULT 'active', -- active, archived, completed
-  total_contracts INTEGER DEFAULT 0,
-  scanned_contracts INTEGER DEFAULT 0,
-  total_findings  INTEGER DEFAULT 0,
-  critical_findings INTEGER DEFAULT 0,
-  high_findings   INTEGER DEFAULT 0,
-  overall_score   NUMERIC(4,1),                -- 0.0 - 10.0
-  created_at      TIMESTAMPTZ DEFAULT now(),
-  updated_at      TIMESTAMPTZ DEFAULT now()
-);
-
-CREATE TABLE project_contracts (
-  id              UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-  project_id      UUID REFERENCES projects(id) ON DELETE CASCADE,
-  contract_id     UUID REFERENCES immunefi_scraper.immunefi_contracts(id),
-  address         VARCHAR(42) NOT NULL,
-  chain           VARCHAR(20) NOT NULL,
-  name            VARCHAR(255),
-  audit_status    VARCHAR(20) DEFAULT 'pending',
-  current_session_id UUID,
-  scanned_at      TIMESTAMPTZ,
-  created_at      TIMESTAMPTZ DEFAULT now(),
-  UNIQUE (project_id, contract_id)
-);
-
-CREATE TABLE project_tags (
-  id              UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-  project_id      UUID REFERENCES projects(id) ON DELETE CASCADE,
-  name            VARCHAR(50) NOT NULL,
-  color           VARCHAR(7) DEFAULT '#6366f1',
-  UNIQUE (project_id, name)
-);
-
--- Indexes
-CREATE INDEX idx_projects_owner ON projects(owner_id);
-CREATE INDEX idx_projects_status ON projects(status);
-CREATE INDEX idx_projects_immunefi ON projects(immunefi_program_id);
-CREATE INDEX idx_project_contracts_status ON project_contracts(project_id, audit_status);
+```json
+/data/project/
+├── projects/{project_id}.json            # Per-project
+│       { "id": "uuid", "name": "...", "chain": "ethereum",
+│         "status": "active", "total_contracts": 5,
+│         "scanned_contracts": 3, "overall_score": 7.5,
+│         "created_at": "...", "updated_at": "..." }
+├── contracts/{project_id}/{contract_id}.json  # Per-contract in project
+├── tags/{project_id}/{tag_name}.json     # Per-tag
+├── indexes/
+│   ├── by_owner.json                     # owner_id → [project_id, ...]
+│   ├── by_status.json                    # status → [project_id, ...]
+│   └── by_immunefi.json                  # program_id → project_id
+└── _meta.json
 ```
 
-### 3.4 Static Analysis Service — PostgreSQL
+### 3.4 Static Analysis Service — JSON Storage
 
-```sql
--- ============================================================
--- STATIC ANALYSIS SERVICE: scans, findings, raw_outputs
--- ============================================================
-
-CREATE TABLE scans (
-  id              UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-  session_id      UUID,                         -- audit session ID
-  contract_address VARCHAR(42) NOT NULL,
-  chain           VARCHAR(20) NOT NULL,
-  tools_used      TEXT[] NOT NULL,
-  status          VARCHAR(20) DEFAULT 'pending',-- pending, running, completed, failed
-  total_findings  INTEGER DEFAULT 0,
-  critical_count  INTEGER DEFAULT 0,
-  high_count      INTEGER DEFAULT 0,
-  medium_count    INTEGER DEFAULT 0,
-  low_count       INTEGER DEFAULT 0,
-  source_url      TEXT,
-  compiler_version VARCHAR(20),
-  duration_seconds INTEGER,
-  error_message   TEXT,
-  started_at      TIMESTAMPTZ,
-  completed_at    TIMESTAMPTZ,
-  created_at      TIMESTAMPTZ DEFAULT now()
-);
-
-CREATE TABLE scan_findings (
-  id              UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-  scan_id         UUID REFERENCES scans(id) ON DELETE CASCADE,
-  tool            VARCHAR(30) NOT NULL,
-  title           VARCHAR(255) NOT NULL,
-  description     TEXT,
-  severity        VARCHAR(20) NOT NULL,         -- critical, high, medium, low, info
-  confidence      NUMERIC(3,2),                -- 0.00 - 1.00
-  file            TEXT,
-  line_start      INTEGER,
-  line_end        INTEGER,
-  code_snippet    TEXT,
-  impact          TEXT,
-  recommendation  TEXT,
-  swc_id          VARCHAR(20),
-  cwe_id          VARCHAR(20),
-  references      TEXT[] DEFAULT '{}',
-  ai_verdict      JSONB,                       -- from AI Analysis Service
-  was_confirmed   BOOLEAN,                     -- AI confirmed?
-  created_at      TIMESTAMPTZ DEFAULT now()
-);
-
-CREATE TABLE scan_tool_outputs (
-  id              UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-  scan_id         UUID REFERENCES scans(id) ON DELETE CASCADE,
-  tool            VARCHAR(30) NOT NULL,
-  raw_output      TEXT,
-  success         BOOLEAN,
-  error_message   TEXT,
-  duration_seconds INTEGER,
-  created_at      TIMESTAMPTZ DEFAULT now()
-);
-
--- Indexes
-CREATE INDEX idx_scans_session ON scans(session_id);
-CREATE INDEX idx_scans_contract ON scans(contract_address);
-CREATE INDEX idx_findings_scan ON scan_findings(scan_id);
-CREATE INDEX idx_findings_severity ON scan_findings(scan_id, severity);
-CREATE INDEX idx_findings_ai ON scan_findings(was_confirmed) WHERE was_confirmed IS NOT NULL;
+```json
+/data/scanner/
+├── scans/{scan_id}.json                    # Per-scan
+│       { "id": "uuid", "session_id": "...", "contract_address": "0x...",
+│         "chain": "ethereum", "tools_used": ["slither", "mythril"],
+│         "status": "completed", "total_findings": 5,
+│         "critical_count": 1, "high_count": 2,
+│         "started_at": "...", "completed_at": "..." }
+├── findings/{scan_id}/{finding_id}.json    # Per-finding
+├── outputs/{scan_id}/{tool}.json           # Raw tool output
+├── indexes/
+│   ├── by_session.json                     # session_id → [scan_id, ...]
+│   ├── by_contract.json                    # contract_address → [scan_id, ...]
+│   └── by_severity.json                    # severity → [scan_id, ...]
+└── _meta.json
 ```
 
 ### 3.5 Exploit Engine — No Persistent DB
@@ -1049,276 +828,75 @@ Data yang perlu disimpan (oleh service lain):
 - Exploit metadata → disimpan oleh **Report Service**
 - Logs → stdout container, dikumpulkan oleh **Observability Stack**
 
-### 3.6 AI Analysis Service — PostgreSQL + Vector
+### 3.6 AI Analysis Service — JSON Storage
 
-```sql
--- ============================================================
--- AI ANALYSIS SERVICE: predictions, embeddings, fix suggestions
--- ============================================================
-
-CREATE TABLE ai_analyses (
-  id              UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-  scan_id         UUID,
-  session_id      UUID,
-  contract_address VARCHAR(42),
-  model_used      VARCHAR(50),                  -- gpt-4o, claude-4, deepseek-v4
-  risk_score      NUMERIC(5,2),                -- 0.00 - 100.00
-  overall_assessment TEXT,
-  summary         TEXT,
-  tokens_used     INTEGER,
-  duration_ms     INTEGER,
-  status          VARCHAR(20) DEFAULT 'completed',
-  created_at      TIMESTAMPTZ DEFAULT now()
-);
-
-CREATE TABLE ai_verdicts (
-  id              UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-  analysis_id     UUID REFERENCES ai_analyses(id) ON DELETE CASCADE,
-  finding_id      UUID,
-  confirmed       BOOLEAN,
-  confidence      NUMERIC(3,2),
-  severity_reassessment VARCHAR(20),
-  reasoning       TEXT,
-  exploit_scenario TEXT,
-  estimated_impact_usd NUMERIC(16, 2),
-  created_at      TIMESTAMPTZ DEFAULT now()
-);
-
-CREATE TABLE fix_recommendations (
-  id              UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-  analysis_id     UUID REFERENCES ai_analyses(id) ON DELETE CASCADE,
-  finding_id      UUID,
-  original_code   TEXT,
-  fixed_code      TEXT,
-  diff            TEXT,
-  explanation     TEXT,
-  gas_impact      VARCHAR(20),                 -- increase, decrease, neutral
-  is_verified     BOOLEAN DEFAULT false,
-  created_at      TIMESTAMPTZ DEFAULT now()
-);
-
--- Vector embeddings table (pgvector)
-CREATE TABLE analysis_embeddings (
-  id              UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-  analysis_id     UUID REFERENCES ai_analyses(id) ON DELETE CASCADE,
-  content_type    VARCHAR(30),                 -- finding, fix, exploit
-  content_hash    VARCHAR(64),
-  embedding       VECTOR(1536),                -- OpenAI ada-3 dimensions
-  metadata        JSONB,
-  created_at      TIMESTAMPTZ DEFAULT now()
-);
-
-CREATE INDEX idx_ai_analyses_session ON ai_analyses(session_id);
-CREATE INDEX idx_ai_verdicts_finding ON ai_verdicts(finding_id);
-CREATE INDEX idx_embeddings_content ON analysis_embeddings USING ivfflat (embedding vector_cosine_ops);
+```json
+/data/ai/
+├── analyses/{analysis_id}.json              # Per-analysis
+│       { "id": "uuid", "scan_id": "...", "contract_address": "0x...",
+│         "model_used": "gpt-4o", "risk_score": 85.5,
+│         "overall_assessment": "...", "summary": "...",
+│         "tokens_used": 15000, "duration_ms": 3200,
+│         "status": "completed", "created_at": "..." }
+├── verdicts/{analysis_id}/{finding_id}.json  # Per-verdict
+├── fixes/{analysis_id}/{finding_id}.json     # Per-fix recommendation
+├── indexes/
+│   ├── by_session.json                      # session_id → [analysis_id, ...]
+│   └── by_contract.json                     # address → [analysis_id, ...]
+└── _meta.json
 ```
 
-### 3.7 Vulnerability DB Service — PostgreSQL + Redis
+### 3.7 Vulnerability DB Service — JSON Storage
 
-```sql
--- ============================================================
--- VULNERABILITY DB SERVICE: patterns, CVE, knowledge base
--- ============================================================
-
-CREATE TABLE vuln_patterns (
-  id              UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-  name            VARCHAR(255) NOT NULL,
-  category        VARCHAR(50) NOT NULL,        -- reentrancy, access-control, oracle, etc.
-  severity        VARCHAR(20) NOT NULL,
-  swc_id          VARCHAR(20),
-  cwe_id          VARCHAR(20),
-  description     TEXT NOT NULL,
-  detection_rules JSONB,                       -- YARA-like rules for pattern matching
-  code_example_bad TEXT,
-  code_example_good TEXT,
-  remediation     TEXT,
-  references      TEXT[] DEFAULT '{}',
-  is_active       BOOLEAN DEFAULT true,
-  version         INTEGER DEFAULT 1,
-  created_at      TIMESTAMPTZ DEFAULT now(),
-  updated_at      TIMESTAMPTZ DEFAULT now()
-);
-
-CREATE TABLE cve_entries (
-  id              UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-  cve_id          VARCHAR(20) UNIQUE NOT NULL, -- CVE-2024-12345
-  title           VARCHAR(255) NOT NULL,
-  description     TEXT,
-  severity        VARCHAR(20),
-  cvss_score      NUMERIC(3,1),
-  affected_contracts TEXT[],
-  affected_chains TEXT[],
-  affected_versions TEXT[],
-  exploit_available BOOLEAN DEFAULT false,
-  exploit_ref     TEXT,
-  fix_commit      TEXT,
-  published_at    TIMESTAMPTZ,
-  created_at      TIMESTAMPTZ DEFAULT now()
-);
-
-CREATE TABLE pattern_matches (
-  id              UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-  scan_id         UUID,
-  finding_id      UUID,
-  pattern_id      UUID REFERENCES vuln_patterns(id),
-  match_confidence NUMERIC(3,2),
-  match_details   JSONB,
-  created_at      TIMESTAMPTZ DEFAULT now()
-);
-
--- Redis cache: hot patterns, frequently matched
--- KEY: vuln:pattern:{id} → Pattern JSON
--- KEY: vuln:cve:{cve_id} → CVE JSON
--- KEY: vuln:hot_patterns → List of top-50 matched patterns (sorted set)
-
-CREATE INDEX idx_vuln_patterns_category ON vuln_patterns(category);
-CREATE INDEX idx_vuln_patterns_severity ON vuln_patterns(severity);
+```json
+/data/vulndb/
+├── patterns/{pattern_id}.json               # Per-vulnerability pattern
+│       { "id": "uuid", "name": "Reentrancy", "category": "reentrancy",
+│         "severity": "high", "swc_id": "SWC-107",
+│         "description": "...", "detection_rules": {...},
+│         "code_example_bad": "...", "code_example_good": "...",
+│         "remediation": "...", "is_active": true }
+├── cve/{cve_id}.json                        # Per-CVE entry
+├── indexes/
+│   ├── by_category.json                    # category → [pattern_id, ...]
+│   └── by_severity.json                    # severity → [pattern_id, ...]
 ```
 
-### 3.8 Report Service — PostgreSQL
+### 3.8 Report Service — JSON Storage
 
-```sql
--- ============================================================
--- REPORT SERVICE: reports, templates, exports
--- ============================================================
-
-CREATE TABLE reports (
-  id              UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-  session_id      UUID NOT NULL,
-  project_id      UUID NOT NULL,
-  immunefi_program_id VARCHAR(100),
-  title           VARCHAR(255) NOT NULL,
-  format          VARCHAR(10) NOT NULL,         -- pdf, html, md, json
-  status          VARCHAR(20) DEFAULT 'draft',  -- draft, generated, exported
-  -- Summary
-  executive_summary TEXT,
-  overall_score   NUMERIC(4,1),
-  risk_assessment TEXT,
-  recommendations TEXT,
-  -- Counts
-  total_findings  INTEGER DEFAULT 0,
-  critical_count  INTEGER DEFAULT 0,
-  high_count      INTEGER DEFAULT 0,
-  medium_count    INTEGER DEFAULT 0,
-  low_count       INTEGER DEFAULT 0,
-  -- Export
-  exported_url    TEXT,
-  file_size_bytes INTEGER,
-  generated_at    TIMESTAMPTZ DEFAULT now(),
-  exported_at     TIMESTAMPTZ,
-  created_at      TIMESTAMPTZ DEFAULT now()
-);
-
-CREATE TABLE report_findings (
-  id              UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-  report_id       UUID REFERENCES reports(id) ON DELETE CASCADE,
-  finding_ref     UUID,
-  title           VARCHAR(255) NOT NULL,
-  severity        VARCHAR(20) NOT NULL,
-  status          VARCHAR(20) DEFAULT 'confirmed',
-  description     TEXT,
-  impact          TEXT,
-  exploit_scenario TEXT,
-  proof_of_concept TEXT,
-  recommendation  TEXT,
-  code_location   TEXT,
-  cwe_id          VARCHAR(20),
-  cvss_score      NUMERIC(3,1),
-  sort_order      INTEGER,
-  created_at      TIMESTAMPTZ DEFAULT now()
-);
-
-CREATE TABLE report_templates (
-  id              UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-  name            VARCHAR(100) NOT NULL,
-  description     TEXT,
-  format          VARCHAR(10) NOT NULL,
-  template_body   TEXT NOT NULL,                -- Handlebars/MJML template
-  is_default      BOOLEAN DEFAULT false,
-  immunefi_compatible BOOLEAN DEFAULT false,
-  created_at      TIMESTAMPTZ DEFAULT now(),
-  updated_at      TIMESTAMPTZ DEFAULT now()
-);
-
--- Insert default Immunefi-compatible template
-INSERT INTO report_templates (name, description, format, template_body, is_default, immunefi_compatible)
-VALUES (
-  'Immunefi Standard',
-  'Template sesuai format submission Immunefi bug bounty',
-  'md',
-  '# Vulnerability Report: {{program_name}}\n\n...',
-  true,
-  true
-);
-
-CREATE INDEX idx_reports_session ON reports(session_id);
-CREATE INDEX idx_reports_project ON reports(project_id);
-CREATE INDEX idx_reports_status ON reports(status);
+```json
+/data/report/
+├── reports/{report_id}.json               # Per-report
+│       { "id": "uuid", "session_id": "...", "project_id": "...",
+│         "title": "...", "format": "md", "status": "draft",
+│         "executive_summary": "...", "overall_score": 7.5,
+│         "total_findings": 5, "critical_count": 1,
+│         "generated_at": "...", "exported_at": "..." }
+├── findings/{report_id}/{finding_id}.json  # Per-finding in report
+├── templates/{template_id}.json            # Report templates
+├── indexes/
+│   ├── by_session.json                    # session_id → [report_id, ...]
+│   ├── by_project.json                    # project_id → [report_id, ...]
+│   └── by_status.json                     # status → [report_id, ...]
+└── _meta.json
 ```
 
-### 3.9 Notification Service — PostgreSQL
+### 3.9 Notification Service — JSON Storage
 
-```sql
--- ============================================================
--- NOTIFICATION SERVICE: webhooks, alerts, delivery logs
--- ============================================================
-
-CREATE TABLE notification_templates (
-  id              UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-  name            VARCHAR(100) NOT NULL,
-  event_type      VARCHAR(50) NOT NULL,         -- audit.completed, finding.critical, etc.
-  channel         VARCHAR(20) NOT NULL,         -- email, slack, discord, webhook
-  subject_template TEXT,
-  body_template   TEXT,
-  created_at      TIMESTAMPTZ DEFAULT now(),
-  updated_at      TIMESTAMPTZ DEFAULT now()
-);
-
-CREATE TABLE notification_queue (
-  id              UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-  event_type      VARCHAR(50) NOT NULL,
-  channel         VARCHAR(20) NOT NULL,
-  recipients      TEXT[],
-  subject         TEXT,
-  body            TEXT,
-  status          VARCHAR(20) DEFAULT 'pending',-- pending, sent, failed
-  retry_count     INTEGER DEFAULT 0,
-  max_retries     INTEGER DEFAULT 3,
-  last_error      TEXT,
-  scheduled_at    TIMESTAMPTZ,
-  sent_at         TIMESTAMPTZ,
-  created_at      TIMESTAMPTZ DEFAULT now()
-);
-
-CREATE TABLE webhooks (
-  id              UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-  user_id         UUID,
-  name            VARCHAR(100),
-  url             TEXT NOT NULL,
-  secret          VARCHAR(255),                 -- for HMAC signing
-  events          TEXT[] NOT NULL,              -- subscribe to specific events
-  is_active       BOOLEAN DEFAULT true,
-  last_triggered_at TIMESTAMPTZ,
-  last_status_code INTEGER,
-  created_at      TIMESTAMPTZ DEFAULT now()
-);
-
-CREATE TABLE delivery_logs (
-  id              UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-  notification_id UUID REFERENCES notification_queue(id),
-  channel         VARCHAR(20),
-  recipient       TEXT,
-  status          VARCHAR(20),
-  status_code     INTEGER,
-  response_body   TEXT,
-  duration_ms     INTEGER,
-  created_at      TIMESTAMPTZ DEFAULT now()
-);
-
-CREATE INDEX idx_notif_queue_status ON notification_queue(status, created_at);
-CREATE INDEX idx_notif_queue_event ON notification_queue(event_type);
-CREATE INDEX idx_webhooks_user ON webhooks(user_id);
+```json
+/data/notifier/
+├── templates/{event_type}_{channel}.json   # Per-template
+├── queue/{notification_id}.json           # Per-queued notification
+├── webhooks/{webhook_id}.json             # Per-webhook config
+├── delivery_logs/{date}.jsonl             # JSON Lines append-only
+├── indexes/
+│   ├── by_event.json                     # event_type → [notification_id, ...]
+│   ├── by_status.json                    # status → [notification_id, ...]
+│   └── by_webhook_user.json             # user_id → [webhook_id, ...]
+└── _meta.json
 ```
+
+
 
 ---
 
@@ -1701,96 +1279,30 @@ STAGE 5: LEARNING LOOP (Feedback ke sistem)
   └── FN → 🔴 KRITIS: buat pattern baru, update AI training
 ```
 
-### 7.3 Database Model — Finding Classification
+### 7.3 Finding Classification Storage (JSON)
 
-```sql
--- ============================================================
--- ADDITIONS TO Static Analysis Service Database
--- ============================================================
-
-CREATE TYPE finding_classification AS ENUM (
-  'unknown',
-  'true_positive',
-  'false_positive', 
-  'true_negative',
-  'false_negative'
-);
-
-CREATE TYPE classification_source AS ENUM (
-  'tool_raw',
-  'ai_verdict',
-  'exploit',
-  'human_review',
-  'immunefi_feedback'
-);
-
--- Add classification columns to scan_findings table
-ALTER TABLE scan_findings ADD COLUMN classification finding_classification DEFAULT 'unknown';
-ALTER TABLE scan_findings ADD COLUMN classification_confidence NUMERIC(3,2);
-ALTER TABLE scan_findings ADD COLUMN classification_source classification_source;
-ALTER TABLE scan_findings ADD COLUMN final_classification BOOLEAN DEFAULT false;
-
--- Reclassification history
-CREATE TABLE finding_reclassifications (
-  id              UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-  finding_id      UUID REFERENCES scan_findings(id) ON DELETE CASCADE,
-  previous_class  finding_classification,
-  new_class       finding_classification NOT NULL,
-  source          classification_source NOT NULL,
-  source_ref      VARCHAR(100),                 -- scan_id, analysis_id, exploit_id, user_id
-  reasoning       TEXT,
-  confidence      NUMERIC(3,2),
-  created_at      TIMESTAMPTZ DEFAULT now()
-);
-
--- ============================================================
--- LEARNING METRICS SERVICE (new or part of Vuln DB)
--- ============================================================
-
-CREATE TABLE platform_metrics (
-  id              UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-  metric_date     DATE NOT NULL,
-  -- Counts
-  total_findings  INTEGER DEFAULT 0,
-  tp_count        INTEGER DEFAULT 0,
-  fp_count        INTEGER DEFAULT 0,
-  tn_count        INTEGER DEFAULT 0,
-  fn_count        INTEGER DEFAULT 0,
-  unclassified    INTEGER DEFAULT 0,
-  -- Computed metrics
-  precision       NUMERIC(5,4),                 -- TP / (TP + FP)
-  recall          NUMERIC(5,4),                 -- TP / (TP + FN)
-  f1_score        NUMERIC(5,4),                 -- 2 * (P * R) / (P + R)
-  accuracy        NUMERIC(5,4),                 -- (TP + TN) / (TP + TN + FP + FN)
-  false_positive_rate NUMERIC(5,4),            -- FP / (FP + TN)
-  false_negative_rate NUMERIC(5,4),            -- FN / (FN + TP)
-  -- Per tool
-  tool_performance JSONB,                       -- {slither: {tp: 5, fp: 3, precision: 0.625}, ...}
-  -- Per severity
-  severity_breakdown JSONB,
-  created_at      TIMESTAMPTZ DEFAULT now(),
-  UNIQUE (metric_date)
-);
-
-CREATE TABLE learning_opportunities (
-  id              UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-  type            VARCHAR(20) NOT NULL,         -- fn, fp (FN = priority)
-  finding_id      UUID REFERENCES scan_findings(id),
-  description     TEXT NOT NULL,
-  root_cause      TEXT,                         -- kenapa alat gagal detect / false alarm
-  pattern_suggestion TEXT,                      -- proposed new pattern
-  severity        VARCHAR(20),
-  status          VARCHAR(20) DEFAULT 'open',   -- open, in_progress, resolved
-  priority        INTEGER DEFAULT 0,            -- 0 (low) - 10 (critical)
-  resolved_at     TIMESTAMPTZ,
-  created_at      TIMESTAMPTZ DEFAULT now()
-);
-
--- Indexes
-CREATE INDEX idx_findings_class ON scan_findings(classification) WHERE final_classification = true;
-CREATE INDEX idx_findings_reclass ON finding_reclassifications(finding_id, created_at DESC);
-CREATE INDEX idx_learning_priority ON learning_opportunities(priority DESC) WHERE status = 'open';
-CREATE INDEX idx_learning_type ON learning_opportunities(type) WHERE status = 'open';
+```json
+/data/scanner/
+├── findings/{scan_id}/{finding_id}.json   # Per-finding dengan field classification
+│       { "id": "uuid", "scan_id": "...", "title": "...",
+│         "classification": "true_positive",
+│         "classification_confidence": 0.92,
+│         "classification_source": "ai_verdict",
+│         "final_classification": true,
+│         "reclassifications": [
+│           { "previous": "unknown", "new": "true_positive",
+│             "source": "exploit", "reasoning": "..." }
+│         ] }
+├── metrics/{date}.json                     # Per-day platform metrics
+│       { "metric_date": "2026-05-20",
+│         "tp_count": 42, "fp_count": 8, "fn_count": 3,
+│         "precision": 0.84, "recall": 0.93, "f1_score": 0.88,
+│         "tool_performance": {"slither": {"tp": 20, "fp": 5}, ...} }
+├── learning/{opp_id}.json                 # Per-learning opportunity
+│       { "id": "uuid", "type": "fn", "finding_id": "...",
+│         "description": "...", "root_cause": "...",
+│         "status": "open", "priority": 10 }
+└── _meta.json
 ```
 
 ### 7.4 Reporting Strategy — Dua Level Laporan

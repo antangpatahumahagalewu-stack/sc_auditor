@@ -161,8 +161,8 @@ async def sync_incremental(self) -> SyncStatus:
 
 ### 3.3 Storage Upgrade: Enhanced JSON (No SQL)
 
-> **Keputusan arsitektur**: Tidak menggunakan SQL database apapun (PostgreSQL, SQLite, dsb).  
-> Service 02 — seperti semua service di VYPER — tetap **100% JSON file-based**.
+> **Keputusan arsitektur**: 100% JSON file-based. Zero SQL. Zero database container.  
+> Service 02 — seperti semua service di VYPER — tetap **Enhanced JSON**.
 >
 > Alasan: lihat VYPER.md § "Why JSON, Not SQL".
 
@@ -367,22 +367,19 @@ class EnhancedJSONStorage:
         return programs
 ```
 
-#### Keuntungan Dibanding PostgreSQL
+#### Keuntungan Enhanced JSON
 
-| Aspek | PostgreSQL (dari proposal) | Enhanced JSON (sekarang) |
-|-------|---------------------------|--------------------------|
-| **Dependency** | +1 container, 200MB+ | **Zero** |
-| **Setup** | Migrations, pooling, config | **Buat folder → selesai** |
-| **Backup** | `pg_dump` → restore | `cp -r /data/immunefi backup/` |
-| **Portability** | Bind to specific PG version | **Bisa di-git, di-rsync, di-zip** |
-| **Debugging** | `psql` + query | **vim, grep, jq, tail -f** |
-| **Performance** | Overkill untuk 234 program | **< 10ms untuk semua operasi** |
-| **History** | Table + JSONB | **JSON Lines — append, grep, rotate** |
-| **Atomicity** | ✅ ACID | ✅ Atomic replace + jsonl append |
-| **Concurrent access** | ✅ MVCC | ⚠️ Single-process (cukup) |
-
-> **Catatan**: Untuk personal use, JSON lebih unggul di semua metrik yang relevan.  
-> PostgreSQL baru worth it kalau ada 10+ concurrent writers atau data > 1GB.
+| Aspek | Enhanced JSON |
+|-------|---------------|
+| **Dependency** | **Zero** — tidak butuh container tambahan |
+| **Setup** | **Buat folder → selesai** |
+| **Backup** | `cp -r /data/immunefi backup/` |
+| **Portability** | Bisa di-git, di-rsync, di-zip |
+| **Debugging** | vim, grep, jq, tail -f |
+| **Performance** | **< 10ms untuk semua operasi** |
+| **History** | JSON Lines — append, grep, rotate |
+| **Atomicity** | ✅ Atomic replace + jsonl append |
+| **Concurrent access** | ⚠️ Single-process (cukup untuk personal use) |
 
 ### 3.4 New Endpoints Level 1
 

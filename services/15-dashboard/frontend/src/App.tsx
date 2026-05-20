@@ -21,6 +21,10 @@ import WebhookLogs from './pages/WebhookLogs';
 import SourceViewer from './pages/SourceViewer';
 import ReportCenter from './pages/ReportCenter';
 import Scheduler from './pages/Scheduler';
+import Cases from './pages/Cases';
+import CaseDetail from './pages/CaseDetail';
+import Archive from './pages/Archive';
+import AgentIntelligence from './pages/AgentIntelligence';
 import NotFound from './pages/NotFound';
 
 export default function App() {
@@ -30,6 +34,7 @@ export default function App() {
         <Route element={<Layout />}>
           <Route path="/" element={<Dashboard />} />
           <Route path="/agent" element={<Agent />} />
+          <Route path="/agent/intelligence" element={<AgentIntelligence />} />
           <Route path="/audits" element={<Audits />} />
           <Route path="/audits/:id" element={<AuditDetail />} />
           <Route path="/programs" element={<Programs />} />
@@ -49,6 +54,9 @@ export default function App() {
           <Route path="/source/:auditId" element={<SourceViewer />} />
           <Route path="/reports" element={<ReportCenter />} />
           <Route path="/scheduler" element={<Scheduler />} />
+          <Route path="/cases" element={<Cases />} />
+          <Route path="/cases/:caseId" element={<CaseDetail />} />
+          <Route path="/archive" element={<Archive />} />
           <Route path="*" element={<NotFound />} />
         </Route>
       </Routes>

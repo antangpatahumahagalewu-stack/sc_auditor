@@ -17,14 +17,32 @@ import structlog
 from fastapi import FastAPI, HTTPException, Query, Request
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import HTMLResponse, JSONResponse, StreamingResponse
+from slowapi import Limiter, _rate_limit_exceeded_handler
+from slowapi.util import get_remote_address
+from starlette.middleware.base import BaseHTTPMiddleware
 from fastapi.staticfiles import StaticFiles
 from src.models import (
     ApiResponse,
+    Case,
+    CaseClose,
+    CaseCreate,
+    CaseStats,
     HealthData,
     Meta,
 )
+from src.health_monitor import HealthMonitor
 from src.proxy import proxy, ServiceProxy
 from src.sse import sse_manager
+from src.storage import (
+    close_case as storage_close_case,
+    create_case as storage_create_case,
+    get_case as storage_get_case,
+    get_case_stats as storage_get_case_stats,
+    get_report_md as storage_get_report_md,
+    get_report_pdf as storage_get_report_pdf,
+    list_cases as storage_list_cases,
+    list_cases_with_total as storage_list_cases_with_total,
+)
 
 # ── Paths ───────────────────────────────────────────────────────
 
@@ -50,6 +68,21 @@ structlog.configure(
 )
 logger = structlog.get_logger(service="dashboard")
 
+# ── Security Headers Middleware ─────────────────────────────────
+
+class SecurityHeadersMiddleware(BaseHTTPMiddleware):
+    """Add security headers to every response."""
+    async def dispatch(self, request: Request, call_next):
+        response = await call_next(request)
+        response.headers["X-Content-Type-Options"] = "nosniff"
+        response.headers["X-Frame-Options"] = "DENY"
+        response.headers["X-XSS-Protection"] = "1; mode=block"
+        response.headers["Referrer-Policy"] = "strict-origin-when-cross-origin"
+        if request.url.scheme == "https":
+            response.headers["Strict-Transport-Security"] = "max-age=31536000; includeSubDomains"
+        return response
+
+
 # ── Application ─────────────────────────────────────────────────
 
 app = FastAPI(
@@ -58,13 +91,26 @@ app = FastAPI(
     version="1.0.0",
 )
 
+ALLOWED_ORIGINS = [
+    "http://localhost:8000",
+    "http://localhost:5173",
+    "http://127.0.0.1:8000",
+    "http://127.0.0.1:5173",
+]
+
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],
+    allow_origins=ALLOWED_ORIGINS,
     allow_credentials=True,
-    allow_methods=["*"],
-    allow_headers=["*"],
+    allow_methods=["GET", "POST", "PUT", "DELETE"],
+    allow_headers=["Content-Type", "X-API-Key"],
 )
+
+app.add_middleware(SecurityHeadersMiddleware)
+
+limiter = Limiter(key_func=get_remote_address)
+app.state.limiter = limiter
+app.add_exception_handler(429, _rate_limit_exceeded_handler)
 
 STATIC_DIR = BASE_DIR / "static"
 if STATIC_DIR.exists():
@@ -73,6 +119,7 @@ if STATIC_DIR.exists():
 # ── Startup / Shutdown ──────────────────────────────────────────
 
 _start_time: float = 0.0
+health_monitor: HealthMonitor = HealthMonitor(check_interval=30.0)
 
 
 @app.on_event("startup")
@@ -81,12 +128,14 @@ async def startup() -> None:
     _start_time = time.time()
     logger.info("Starting Dashboard Service")
     await proxy.start()
+    await health_monitor.start()
     logger.info("Dashboard ready — http://localhost:8000")
 
 
 @app.on_event("shutdown")
 async def shutdown() -> None:
     logger.info("Shutting down Dashboard Service")
+    await health_monitor.stop()
     await proxy.close()
 
 
@@ -139,12 +188,35 @@ async def health() -> JSONResponse:
     )
 
 
+@app.get("/api/health/graph")
+async def health_graph() -> JSONResponse:
+    """Dependency graph + status for all services."""
+    try:
+        graph = health_monitor.get_graph()
+        return _ok(data=graph)
+    except Exception as e:
+        logger.error("Health graph failed", error=str(e))
+        return _err(f"Health graph failed: {e}", status_code=502)
+
+
+@app.get("/api/health/metrics")
+async def health_metrics() -> JSONResponse:
+    """Aggregated metrics across all services."""
+    try:
+        metrics = health_monitor.get_metrics()
+        return _ok(data=metrics)
+    except Exception as e:
+        logger.error("Health metrics failed", error=str(e))
+        return _err(f"Health metrics failed: {e}", status_code=502)
+
+
 # ═══════════════════════════════════════════════════════════════
 # SSE — Server-Sent Events
 # ═══════════════════════════════════════════════════════════════
 
 @app.get("/events")
-async def sse_events() -> StreamingResponse:
+@limiter.limit("100/minute")
+async def sse_events(request: Request) -> StreamingResponse:
     """SSE stream for real-time dashboard updates."""
     queue = await sse_manager.connect()
     logger.info("SSE client connected")
@@ -169,7 +241,8 @@ async def sse_events() -> StreamingResponse:
 # ── Daemon ──────────────────────────────────────────────────────
 
 @app.post("/api/daemon/start")
-async def api_daemon_start() -> JSONResponse:
+@limiter.limit("10/minute")
+async def api_daemon_start(request: Request) -> JSONResponse:
     """Start daemon (proxies to Orchestrator)."""
     try:
         result = await proxy.start_daemon()
@@ -180,7 +253,8 @@ async def api_daemon_start() -> JSONResponse:
 
 
 @app.post("/api/daemon/stop")
-async def api_daemon_stop() -> JSONResponse:
+@limiter.limit("10/minute")
+async def api_daemon_stop(request: Request) -> JSONResponse:
     """Stop daemon (proxies to Orchestrator)."""
     try:
         result = await proxy.stop_daemon()
@@ -698,6 +772,192 @@ async def api_upkeep_logs(limit: int = Query(50, ge=1, le=500)) -> JSONResponse:
     except Exception as e:
         logger.error("Upkeep logs failed", error=str(e))
         return _err(f"Upkeep logs failed: {e}", status_code=502)
+
+
+# ═══════════════════════════════════════════════════════════════
+# Case Management — Agenda 05: Each Bug Is Cases
+# ═══════════════════════════════════════════════════════════════
+
+@logger.catch()
+@app.get("/api/cases")
+async def api_list_cases(
+    status: Optional[str] = Query(None),
+    search: Optional[str] = Query(None),
+    severity: Optional[str] = Query(None),
+    confidence: Optional[str] = Query(None, description="Filter by confidence label (Low/Medium/High/Critical)"),
+    sort: str = Query("created_at"),
+    order: str = Query("desc"),
+    limit: int = Query(100, ge=1, le=1000),
+    offset: int = Query(0, ge=0),
+) -> JSONResponse:
+    """List all OPEN cases with filter, search, sort, pagination."""
+    try:
+        cases, total = storage_list_cases_with_total(
+            status=status or "OPEN",
+            search=search,
+            severity=severity,
+            confidence=confidence,
+            sort=sort,
+            order=order,
+            limit=limit,
+            offset=offset,
+        )
+        return _ok(
+            data=[c.model_dump(mode="json") for c in cases],
+            total=total,
+            limit=limit,
+            offset=offset,
+        )
+    except Exception as e:
+        logger.error("List cases failed", error=str(e))
+        return _err(f"Failed to list cases: {e}", status_code=500)
+
+
+@logger.catch()
+@app.get("/api/cases/archive")
+async def api_list_archive(
+    search: Optional[str] = Query(None),
+    sort: str = Query("closed_at"),
+    order: str = Query("desc"),
+    limit: int = Query(100, ge=1, le=1000),
+    offset: int = Query(0, ge=0),
+) -> JSONResponse:
+    """List all CLOSED cases with filter, search, sort, pagination."""
+    try:
+        cases, total = storage_list_cases_with_total(
+            status="CLOSED",
+            search=search,
+            sort=sort,
+            order=order,
+            limit=limit,
+            offset=offset,
+        )
+        return _ok(
+            data=[c.model_dump(mode="json") for c in cases],
+            total=total,
+            limit=limit,
+            offset=offset,
+        )
+    except Exception as e:
+        logger.error("List archive failed", error=str(e))
+        return _err(f"Failed to list archive: {e}", status_code=500)
+
+
+@logger.catch()
+@app.get("/api/cases/stats")
+async def api_case_stats() -> JSONResponse:
+    """Get case statistics for dashboard."""
+    try:
+        stats = storage_get_case_stats()
+        return _ok(data=stats.model_dump(mode="json"))
+    except Exception as e:
+        logger.error("Case stats failed", error=str(e))
+        return _err(f"Failed to get case stats: {e}", status_code=500)
+
+
+@logger.catch()
+@app.get("/api/cases/{case_id}")
+async def api_get_case(case_id: str) -> JSONResponse:
+    """Get a single case by ID."""
+    try:
+        case = storage_get_case(case_id)
+        if case is None:
+            return _err(f"Case not found: {case_id}", status_code=404)
+        return _ok(data=case.model_dump(mode="json"))
+    except Exception as e:
+        logger.error("Get case failed", case_id=case_id, error=str(e))
+        return _err(f"Failed to get case: {e}", status_code=500)
+
+
+@logger.catch()
+@app.post("/api/cases")
+@limiter.limit("30/minute")
+async def api_create_case(request: Request, body: CaseCreate) -> JSONResponse:
+    """Create a new case (from Agent scanner output)."""
+    try:
+        case = storage_create_case(body)
+        # Broadcast via SSE
+        await sse_manager.broadcast_audit_progress(
+            audit_id=case.case_id,
+            state="OPEN",
+            progress=1.0,
+            message=f"New case: {case.title}",
+        )
+        return _ok(data=case.model_dump(mode="json"))
+    except Exception as e:
+        logger.error("Create case failed", error=str(e))
+        return _err(f"Failed to create case: {e}", status_code=500)
+
+
+@logger.catch()
+@app.put("/api/cases/{case_id}/close")
+async def api_close_case(case_id: str, body: CaseClose) -> JSONResponse:
+    """Close a case (by User after bounty received or FP)."""
+    try:
+        case = storage_close_case(
+            case_id=case_id,
+            reason=body.closed_reason,
+            bounty=body.bounty_amount,
+            notes=body.notes,
+        )
+        if case is None:
+            existing = storage_get_case(case_id)
+            if existing is None:
+                return _err(f"Case not found: {case_id}", status_code=404)
+            return _err(f"Case {case_id} is already closed", status_code=400)
+        # Broadcast via SSE
+        await sse_manager.broadcast_audit_progress(
+            audit_id=case_id,
+            state="CLOSED",
+            progress=1.0,
+            message=f"Case closed: {body.closed_reason.value}",
+        )
+        return _ok(data=case.model_dump(mode="json"))
+    except Exception as e:
+        logger.error("Close case failed", case_id=case_id, error=str(e))
+        return _err(f"Failed to close case: {e}", status_code=500)
+
+
+@logger.catch()
+@app.get("/api/cases/{case_id}/report.md")
+async def api_case_report_md(case_id: str) -> JSONResponse:
+    """Download case report as Markdown."""
+    try:
+        md = storage_get_report_md(case_id)
+        if md is None:
+            return _err(f"Case not found: {case_id}", status_code=404)
+        from fastapi.responses import Response
+        return Response(
+            content=md,
+            media_type="text/markdown",
+            headers={
+                "Content-Disposition": f'attachment; filename="{case_id}_report.md"',
+            },
+        )
+    except Exception as e:
+        logger.error("Report MD failed", case_id=case_id, error=str(e))
+        return _err(f"Failed to generate report: {e}", status_code=500)
+
+
+@logger.catch()
+@app.get("/api/cases/{case_id}/report.pdf")
+async def api_case_report_pdf(case_id: str) -> JSONResponse:
+    """Download case report as PDF."""
+    try:
+        pdf = storage_get_report_pdf(case_id)
+        if pdf is None:
+            return _err(f"Case not found: {case_id}", status_code=404)
+        from fastapi.responses import Response
+        return Response(
+            content=pdf,
+            media_type="application/pdf",
+            headers={
+                "Content-Disposition": f'attachment; filename="{case_id}_report.pdf"',
+            },
+        )
+    except Exception as e:
+        logger.error("Report PDF failed", case_id=case_id, error=str(e))
+        return _err(f"Failed to generate PDF: {e}", status_code=500)
 
 
 # ═══════════════════════════════════════════════════════════════

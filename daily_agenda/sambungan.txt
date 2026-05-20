@@ -1,0 +1,16 @@
+[•] T1: shared/metrics.py — Shared Prometheus metrics module
+[ ] T2-T6: Agent Memory System (base, vector, episodic, graph, __init__)
+[ ] T7: health_monitor.py — Health check aggregator
+[ ] T8: Update 15-dashboard/app.py + health API endpoints
+[ ] T9-T11: Metrics + logging + trace_id di semua 20 services
+[ ] T12: Enhance ServiceHealth.tsx frontend
+[ ] T13: Update requirements
+[ ] Quality gate + verify + closed
+
+
+
+# Todos
+[✓] Fase 1: Brainstorming — sudah selesai (gap analysis)
+[✓] Fase 2: Planning — sudah selesai (task breakdown)
+[•] Fase 3: Implementasi — Auto-handoff ke @vibe-coder dengan kontrak penuh
+[ ] Fase 4: Closed — verifikasi 100%, update status, log

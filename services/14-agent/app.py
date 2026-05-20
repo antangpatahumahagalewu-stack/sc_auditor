@@ -3,13 +3,21 @@
 Port: 8014
 
 Endpoints:
-  POST /agent/run        → Start agent task (full audit pipeline)
-  GET  /agent/{id}       → Get session status & steps
-  GET  /agent/sessions   → List all sessions
-  POST /agent/stop/{id}  → Stop running session
-  GET  /skills           → List all registered skills
-  GET  /memory           → Get memory contents
-  GET  /health           → Health check
+  POST /agent/run            → Start agent task (full audit pipeline)
+  GET  /agent/{id}           → Get session status & steps
+  GET  /agent/sessions       → List all sessions
+  POST /agent/stop/{id}      → Stop running session
+  GET  /skills               → List all registered skills
+  GET  /memory               → Get memory contents
+  POST /memory/search        → Search across memory stores
+  GET  /memory/stats         → Get memory store statistics
+  POST /daemon/start         → Start autonomous daemon
+  POST /daemon/stop          → Stop autonomous daemon
+  GET  /daemon/status        → Get daemon status
+  POST /learning/feedback    → Submit session feedback
+  GET  /learning/stats       → Get learning statistics
+  GET  /learning/recommendations → Get learning recommendations
+  GET  /health               → Health check
 """
 
 from __future__ import annotations
@@ -24,9 +32,12 @@ import structlog
 from fastapi import FastAPI, HTTPException, Query
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
+from pydantic import BaseModel, Field
 
 from src.agent import AgentLoop
+from src.daemon import AgentDaemon
 from src.lead_auditor import LeadAuditor
+from src.learning.feedback import FeedbackLearner
 from src.llm import AgentReasoningClient
 from src.memory import AgentMemory
 from src.models import (
@@ -90,6 +101,8 @@ class AppState:
         self.llm: AgentReasoningClient | None = None
         self.agent: AgentLoop | None = None
         self.lead_auditor: LeadAuditor | None = None
+        self.daemon: AgentDaemon | None = None
+        self.learner: FeedbackLearner | None = None
         self.http_client: httpx.AsyncClient | None = None
 
 
@@ -190,6 +203,16 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
             continue
         state.lead_auditor.register_sub_agent(persona.role)
         persona_count += 1
+
+    # Init Daemon (tidak auto-start — via API)
+    state.daemon = AgentDaemon(
+        agent=state.agent,
+        http_client=state.http_client,
+        interval=3600,
+    )
+
+    # Init Feedback Learner
+    state.learner = FeedbackLearner(memory=state.agent.memory)
 
     log.info(
         "agent_service_started",
@@ -382,6 +405,15 @@ async def list_skills() -> ApiResponse:
     })
 
 
+@app.get("/skills/metrics")
+async def skill_metrics() -> ApiResponse:
+    """Get usage metrics for all skills."""
+    if state is None or state.registry is None:
+        raise _err("Service not initialized", 503)
+
+    return _ok(state.registry.get_all_metrics())
+
+
 @app.get("/memory")
 async def get_memory() -> ApiResponse:
     """Get current agent memory contents."""
@@ -402,6 +434,182 @@ async def get_memory() -> ApiResponse:
         "semantic": {k: _truncate(v) for k, v in list(memory.semantic.items())[:10]},
         "total_entries": memory.total_entries,
     })
+
+
+# ── Daemon Endpoints (T8+T10) ──────────────────────────────
+
+
+@app.post("/daemon/start")
+async def daemon_start() -> ApiResponse:
+    """Start the autonomous daemon background loop."""
+    if state is None or state.daemon is None:
+        raise _err("Service not initialized", 503)
+
+    started = state.daemon.start()
+    return _ok({
+        "running": state.daemon.is_running,
+        "started": started,
+        "message": "Daemon started" if started else "Daemon already running",
+    })
+
+
+@app.post("/daemon/stop")
+async def daemon_stop() -> ApiResponse:
+    """Stop the daemon background loop."""
+    if state is None or state.daemon is None:
+        raise _err("Service not initialized", 503)
+
+    stopped = await state.daemon.stop()
+    return _ok({
+        "running": state.daemon.is_running,
+        "stopped": stopped,
+        "message": "Daemon stopped" if stopped else "Daemon was not running",
+    })
+
+
+@app.get("/daemon/status")
+async def daemon_status() -> ApiResponse:
+    """Get daemon status and statistics."""
+    if state is None or state.daemon is None:
+        raise _err("Service not initialized", 503)
+
+    return _ok(state.daemon.get_status())
+
+
+# ── Memory Search Endpoint (T11) ───────────────────────────
+
+
+class MemorySearchRequest(BaseModel):
+    query: str
+    store: str = "vector"  # vector | episodic | graph
+    limit: int = 10
+    filters: dict[str, Any] = Field(default_factory=dict)
+
+
+@app.post("/memory/search")
+async def memory_search(body: MemorySearchRequest) -> ApiResponse:
+    """Search across memory stores.
+
+    **Request body**::
+
+        {
+            "query": "reentrancy vulnerability",
+            "store": "vector",
+            "limit": 10
+        }
+    """
+    if state is None or state.agent is None:
+        raise _err("Service not initialized", 503)
+
+    memory = state.agent.memory
+
+    try:
+        if body.store == "vector":
+            results = await memory.vector.search(
+                body.query, limit=body.limit, **body.filters
+            )
+        elif body.store == "episodic":
+            results = await memory.episodic_store.search(
+                body.query, limit=body.limit, **body.filters
+            )
+        elif body.store == "graph":
+            results = await memory.graph.search(
+                body.query, limit=body.limit, **body.filters
+            )
+        else:
+            raise _err(f"Unknown store: {body.store}", 400)
+
+        return _ok({
+            "store": body.store,
+            "query": body.query,
+            "results": results,
+            "total": len(results),
+        })
+    except Exception as exc:
+        raise _err(f"Memory search failed: {exc}", 500)
+
+
+# ── Feedback & Learning Endpoints (T9+T12+T14) ────────────
+
+
+class FeedbackRequest(BaseModel):
+    session_id: str
+    rating: int = Field(default=3, ge=1, le=5)
+    comment: str = ""
+    tags: list[str] = Field(default_factory=list)
+
+
+@app.post("/learning/feedback")
+async def submit_feedback(body: FeedbackRequest) -> ApiResponse:
+    """Submit feedback for a completed session."""
+    if state is None or state.agent is None:
+        raise _err("Service not initialized", 503)
+
+    session = state.agent.get_session(body.session_id)
+    if session is None:
+        raise _err(f"Session not found: {body.session_id}", 404)
+
+    # Store feedback in vector memory
+    memory = state.agent.memory
+    try:
+        await memory.vector.store(
+            f"feedback_{body.session_id[:8]}",
+            f"Session {body.session_id[:8]}: rating={body.rating}/5, {body.comment}",
+            metadata={
+                "type": "feedback",
+                "session_id": body.session_id,
+                "rating": body.rating,
+                "tags": body.tags,
+                "comment": body.comment[:200],
+            },
+        )
+    except Exception as exc:
+        log.warning("feedback_store_failed", error=str(exc))
+
+    return _ok({
+        "submitted": True,
+        "session_id": body.session_id,
+        "rating": body.rating,
+    })
+
+
+@app.get("/learning/stats")
+async def learning_stats() -> ApiResponse:
+    """Get learning statistics."""
+    if state is None or state.learner is None:
+        raise _err("Service not initialized", 503)
+
+    return _ok(state.learner.get_stats())
+
+
+@app.get("/learning/recommendations")
+async def learning_recommendations(
+    task_type: str | None = None,
+) -> ApiResponse:
+    """Get learning-based recommendations.
+
+    **Query params**::
+        task_type: Optional filter by task type
+    """
+    if state is None or state.learner is None:
+        raise _err("Service not initialized", 503)
+
+    recommendations = await state.learner.get_recommendations(
+        task_type=task_type
+    )
+    return _ok(recommendations)
+
+
+# ── Memory Stats Endpoint (T14) ────────────────────────────
+
+
+@app.get("/memory/stats")
+async def memory_stats() -> ApiResponse:
+    """Get detailed memory store statistics."""
+    if state is None or state.agent is None:
+        raise _err("Service not initialized", 503)
+
+    return _ok(state.agent.memory.get_all_stats())
 
 
 # ── Team Endpoints ───────────────────────────────────────────
