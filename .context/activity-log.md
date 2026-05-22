@@ -1,5 +1,23 @@
 # Activity Log
 
+### 2026-05-22 — [IMPLEMENTASI] — vyper monitor: Terminal Live Dashboard (TUI)
+- **Agent**: lore-master → vibe-coder (auto-handoff)
+- **Project**: sc_auditor (CLI tool)
+- **Konteks**: Implementasi `vyper monitor` — Textual-based TUI live dashboard sebagai pengganti web dashboard React. Menampilkan real-time event log, service health, dan pipeline stats dari 19 microservices.
+- **Aktivitas**: Membuat 5 file + memodifikasi 2 file:
+  - `cli/monitor/__init__.py` — package init
+  - `cli/monitor/client.py` — MonitorClient: poll health (19 services), stats (/stats), events (dari audit state changes), queue size
+  - `cli/monitor/widgets.py` — StatusBar, EventLog (RichLog + filter by level), SummaryBar (stats + health dots), ShortcutsBar
+  - `cli/monitor/app.py` — VyperMonitorApp: compose layout, 3 background polling tasks (health 5s, events 3s, stats 10s), keyboard handlers (Q/Space// /1-6/r)
+  - `cli/commands/monitor_cmd.py` — Typer command wrapper dgn --interval flag
+  - `cli/main.py` — import + app.add_typer registrasi
+  - `cli/requirements.txt` — tambah textual>=1.0.0
+- **Detail**: Karena tidak ada /api/events endpoint di orchestrator, events digenerate dari audit state changes (poll /audits, track state transitions). 4 Textual widgets (StatusBar, EventLog, SummaryBar, ShortcutsBar). Filter 6 level via keyboard (ALL/SUCCESS/INFO/WARNING/ERROR/CRITICAL). Search via Input dialog (/). Graceful degradation — polling tetap jalan meski service down.
+- **File Terkait**: 5 created + 2 modified
+- **Keputusan**: Textual 8.x (bukan Rich Panel live-refresh) untuk TUI yang interaktif. Events dari audit state diff karena tidak ada SSE endpoint.
+- **Pola Terdeteksi**: Pattern handoff lore-master → vibe-coder berjalan mulus. Reuse existing VyperClient patterns (httpx, ApiResponse unwrap, error handling).
+- **Outcome**: sukses — semua imports OK, `vyper monitor --help` muncul, 18 total commands
+
 ### 2026-05-20 — [IMPLEMENTATION] — 16-Submission Service (Submission Assistant)
 - **Agent**: lore-master → vibe-coder (auto-handoff)
 - **Project**: VYPER — Smart Contract Bug Hunter

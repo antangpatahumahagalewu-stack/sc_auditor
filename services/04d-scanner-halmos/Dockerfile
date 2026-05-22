@@ -21,11 +21,12 @@ RUN pip install --no-cache-dir halmos
 # Create service directory
 WORKDIR /app
 
-# Copy service code
-COPY requirements.txt .
+# Install app deps
+COPY services/04d-scanner-halmos/requirements.txt .
 RUN pip install --no-cache-dir -r requirements.txt
 
-COPY . .
+# Copy service code
+COPY services/04d-scanner-halmos/ .
 
 EXPOSE 8017
 

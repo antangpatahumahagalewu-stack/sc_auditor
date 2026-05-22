@@ -12,3 +12,4 @@ python-multipart>=0.0.9
 
 # Analysis tool (isolated — conflicts with web3 6.x eth-hash >=0.5.1)
 mythril==0.24.8
+prometheus-client>=0.19.0

@@ -10,14 +10,6 @@ const SEVERITY_COLORS: Record<string, string> = {
   Info: 'bg-blue-500/20 text-blue-400',
 };
 
-const CONFIDENCE_COLORS: Record<string, string> = {
-  Critical: 'bg-red-500/20 text-red-400',
-  High: 'bg-orange-500/20 text-orange-400',
-  Medium: 'bg-yellow-500/20 text-yellow-400',
-  Low: 'bg-gray-500/20 text-gray-400',
-};
-
-const CONFIDENCE_ORDER = ['Critical', 'High', 'Medium', 'Low'];
 const SEVERITY_ORDER = ['Critical', 'High', 'Medium', 'Low', 'Info'];
 
 function statCardClass() {

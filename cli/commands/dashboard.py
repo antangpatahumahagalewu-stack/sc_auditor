@@ -1,29 +1,26 @@
-"""Dashboard command — open the Vyper web dashboard in a browser."""
+"""Dashboard command — web dashboard has been removed, redirect to monitor."""
 
 from __future__ import annotations
 
-import webbrowser
-
 import typer
 from rich.console import Console
-
-from cli.config import get_config
 
 console = Console()
 err_console = Console(stderr=True)
 
 
 def dashboard(
-    url: str = typer.Option("", "--url", "-u", help="Dashboard URL override"),
+    url: str = typer.Option("", "--url", "-u", help="Dashboard URL override (ignored)"),
 ) -> None:
-    """Open the Vyper web dashboard in your default browser."""
-    cfg = get_config()
-    dash_url = url or cfg.get("dashboard_url", "http://localhost:8000")
+    """The Vyper web dashboard has been removed.
 
-    console.print(f"[cyan]Opening dashboard:[/] {dash_url}")
-    try:
-        webbrowser.open(dash_url)
-        console.print("[green]✅ Dashboard opened in browser.[/]")
-    except Exception as exc:
-        err_console.print(f"[red]Failed to open browser:[/] {exc}")
-        console.print(f"Visit manually: {dash_url}")
+    Use ``vyper monitor`` instead for the live terminal dashboard, or
+    ``vyper health`` for a quick service status overview.
+    """
+    console.print(
+        "[yellow]⚠ Web dashboard (15-dashboard) has been removed.[/]\n\n"
+        "Use [bold cyan]vyper monitor[/] for a live terminal dashboard, or\n"
+        "[bold cyan]vyper health[/] for a quick service status overview.\n\n"
+        "To re-enable the dashboard, add the 15-dashboard service back to\n"
+        "docker-compose.yml and rebuild:  docker compose build 15-dashboard"
+    )

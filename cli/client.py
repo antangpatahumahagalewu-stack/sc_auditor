@@ -143,19 +143,38 @@ class VyperClient:
             return {"name": name or base_url, "status": "unhealthy", "error": str(exc)}
 
     async def health_all(self) -> list[dict]:
-        """Check health of all services in parallel."""
-        services = [
-            (self.cfg.get("orchestrator_url"), "orchestrator"),
-            (self.cfg.get("scanner_url"), "scanner"),
-            (self.cfg.get("exploit_url"), "exploit"),
-            (self.cfg.get("reporter_url"), "reporter"),
-            (self.cfg.get("notifier_url"), "notifier"),
-            (self.cfg.get("source_url"), "source"),
-            (self.cfg.get("immunefi_url"), "immunefi"),
-            (self.cfg.get("dashboard_url"), "dashboard"),
+        """Check health of all 20 services in parallel.
+
+        Uses config URLs where available, falls back to localhost:port
+        for services not registered in config.
+        """
+        # ── All 20 services with their check URLs ─────────────────
+        all_services: list[tuple[str, str]] = [
+            # (display_name, health_url)
+            ("orchestrator",      self.cfg.get("orchestrator_url") or "http://localhost:8009"),
+            ("scanner",           self.cfg.get("scanner_url") or "http://localhost:8003"),
+            ("exploit",           self.cfg.get("exploit_url") or "http://localhost:8006"),
+            ("reporter",          self.cfg.get("reporter_url") or "http://localhost:8007"),
+            ("notifier",          self.cfg.get("notifier_url") or "http://localhost:8008"),
+            ("source",            self.cfg.get("source_url") or "http://localhost:8002"),
+            ("immunefi",          self.cfg.get("immunefi_url") or "http://localhost:8001"),
+            # ── Services without config URL → cek via localhost ────
+            ("01-config",         "http://localhost:8011"),
+            ("04a-scanner-slither", "http://localhost:8014"),
+            ("04b-scanner-echidna", "http://localhost:8015"),
+            ("04c-scanner-forge", "http://localhost:8016"),
+            ("04d-scanner-halmos", "http://localhost:8017"),
+            ("05-scanner-mythril", "http://localhost:8013"),
+            ("06-ai",             "http://localhost:8004"),
+            ("07-classifier",     "http://localhost:8005"),
+            ("12-webhook",        "http://localhost:8010"),
+            ("13-upkeep",         "http://localhost:8012"),
+            ("14-agent",          "http://localhost:8021"),
+            ("16-submission",     "http://localhost:8018"),
         ]
+
         import asyncio
-        tasks = [self.check_health(url, name) for url, name in services]
+        tasks = [self.check_health(url, name) for name, url in all_services]
         return await asyncio.gather(*tasks)
 
     # ── Orchestrator API ───────────────────────────────────────

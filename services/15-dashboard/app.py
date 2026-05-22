@@ -778,7 +778,6 @@ async def api_upkeep_logs(limit: int = Query(50, ge=1, le=500)) -> JSONResponse:
 # Case Management — Agenda 05: Each Bug Is Cases
 # ═══════════════════════════════════════════════════════════════
 
-@logger.catch()
 @app.get("/api/cases")
 async def api_list_cases(
     status: Optional[str] = Query(None),
@@ -813,7 +812,6 @@ async def api_list_cases(
         return _err(f"Failed to list cases: {e}", status_code=500)
 
 
-@logger.catch()
 @app.get("/api/cases/archive")
 async def api_list_archive(
     search: Optional[str] = Query(None),
@@ -843,7 +841,6 @@ async def api_list_archive(
         return _err(f"Failed to list archive: {e}", status_code=500)
 
 
-@logger.catch()
 @app.get("/api/cases/stats")
 async def api_case_stats() -> JSONResponse:
     """Get case statistics for dashboard."""
@@ -855,7 +852,6 @@ async def api_case_stats() -> JSONResponse:
         return _err(f"Failed to get case stats: {e}", status_code=500)
 
 
-@logger.catch()
 @app.get("/api/cases/{case_id}")
 async def api_get_case(case_id: str) -> JSONResponse:
     """Get a single case by ID."""
@@ -869,7 +865,6 @@ async def api_get_case(case_id: str) -> JSONResponse:
         return _err(f"Failed to get case: {e}", status_code=500)
 
 
-@logger.catch()
 @app.post("/api/cases")
 @limiter.limit("30/minute")
 async def api_create_case(request: Request, body: CaseCreate) -> JSONResponse:
@@ -889,7 +884,6 @@ async def api_create_case(request: Request, body: CaseCreate) -> JSONResponse:
         return _err(f"Failed to create case: {e}", status_code=500)
 
 
-@logger.catch()
 @app.put("/api/cases/{case_id}/close")
 async def api_close_case(case_id: str, body: CaseClose) -> JSONResponse:
     """Close a case (by User after bounty received or FP)."""
@@ -918,7 +912,6 @@ async def api_close_case(case_id: str, body: CaseClose) -> JSONResponse:
         return _err(f"Failed to close case: {e}", status_code=500)
 
 
-@logger.catch()
 @app.get("/api/cases/{case_id}/report.md")
 async def api_case_report_md(case_id: str) -> JSONResponse:
     """Download case report as Markdown."""
@@ -939,7 +932,6 @@ async def api_case_report_md(case_id: str) -> JSONResponse:
         return _err(f"Failed to generate report: {e}", status_code=500)
 
 
-@logger.catch()
 @app.get("/api/cases/{case_id}/report.pdf")
 async def api_case_report_pdf(case_id: str) -> JSONResponse:
     """Download case report as PDF."""

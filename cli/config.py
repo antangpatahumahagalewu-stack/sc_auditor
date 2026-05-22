@@ -22,7 +22,7 @@ DEFAULT_CONFIG: Dict[str, Any] = {
     "scanner_url": "http://localhost:8003",
     "exploit_url": "http://localhost:8006",
     "reporter_url": "http://localhost:8007",
-    "dashboard_url": "http://localhost:8000",
+    # "dashboard_url": "http://localhost:8000",  # 15-dashboard has been removed
     "notifier_url": "http://localhost:8008",
     "source_url": "http://localhost:8002",
     "immunefi_url": "http://localhost:8001",
@@ -38,6 +38,113 @@ DEFAULT_CONFIG: Dict[str, Any] = {
     # Docker compose config
     "compose_file": "docker-compose.yml",
     "project_name": "sc_auditor",
+
+    # ── LLM API Keys (disimpan lokal, tidak di-commit) ──────────────
+    # Provider utama
+    "openai_key": "",
+    "anthropic_key": "",
+    "deepseek_key": "",
+    "google_key": "",
+    "xai_key": "",
+
+    # Provider komunitas & agregator
+    "openrouter_key": "",
+    "openrouter_referer": "",       # identifier untuk OpenRouter
+    "nous_key": "",
+    "novita_key": "",
+
+    # Provider China & Asia
+    "alibaba_key": "",
+    "xiaomi_key": "",
+    "tencent_key": "",
+    "zai_key": "",
+    "kimi_key": "",
+    "stepfun_key": "",
+    "minimax_key": "",
+
+    # Provider open-source / cloud
+    "ollama_cloud_key": "",
+    "huggingface_key": "",
+    "nvidia_key": "",
+    "arcee_key": "",
+    "gmi_key": "",
+    "kilocode_key": "",
+
+    # OpenCode resmi
+    "opencode_zen_key": "",
+    "opencode_go_key": "",
+
+    # Cloud enterprise
+    "bedrock_key": "",              # AWS Bedrock (IAM fallback)
+    "azure_foundry_key": "",
+    "ai_gateway_key": "",
+
+    # ── LLM Models ─────────────────────────────────────────────────
+    # Provider utama
+    "openai_model": "gpt-4o",
+    "anthropic_model": "claude-sonnet-4-6",
+    "deepseek_model": "deepseek-chat",
+    "google_model": "gemini-2.0-flash",
+    "xai_model": "grok-2",
+
+    # Provider komunitas & agregator
+    "openrouter_model": "anthropic/claude-sonnet-4.6",
+    "nous_model": "hermes-3-405b",
+    "novita_model": "moonshotai/kimi-k2.5",
+
+    # Provider China & Asia
+    "alibaba_model": "qwen3.6-plus",
+    "xiaomi_model": "mimo-v2.5-pro",
+    "tencent_model": "hy3-preview",
+    "zai_model": "glm-5.1",
+    "kimi_model": "kimi-k2.6",
+    "stepfun_model": "step-3.5-flash",
+    "minimax_model": "MiniMax-M2.7",
+
+    # Provider open-source / cloud
+    "ollama_cloud_model": "qwen3.6-plus",
+    "huggingface_model": "moonshotai/Kimi-K2.5",
+    "nvidia_model": "nvidia/nemotron-3-super-120b-a12b",
+    "arcee_model": "trinity-large-thinking",
+    "gmi_model": "zai-org/GLM-5.1-FP8",
+    "kilocode_model": "anthropic/claude-sonnet-4.6",
+
+    # OpenCode resmi
+    "opencode_zen_model": "kimi-k2.5",
+    "opencode_go_model": "kimi-k2.6",
+
+    # Cloud enterprise
+    "bedrock_model": "us.anthropic.claude-sonnet-4-6",
+    "azure_foundry_model": "",
+    "ai_gateway_model": "moonshotai/kimi-k2.6",
+
+    # ── Custom Base URLs (untuk self-hosted / OpenAI-compatible proxy) ──
+    "openai_base_url": "",
+    "anthropic_base_url": "",
+    "deepseek_base_url": "",
+    "google_base_url": "",
+    "xai_base_url": "",
+    "openrouter_base_url": "",
+    "nous_base_url": "",
+    "novita_base_url": "",
+    "alibaba_base_url": "",
+    "xiaomi_base_url": "",
+    "tencent_base_url": "",
+    "zai_base_url": "",
+    "kimi_base_url": "",
+    "stepfun_base_url": "",
+    "minimax_base_url": "",
+    "ollama_cloud_base_url": "",
+    "huggingface_base_url": "",
+    "nvidia_base_url": "",
+    "arcee_base_url": "",
+    "gmi_base_url": "",
+    "kilocode_base_url": "",
+    "opencode_zen_base_url": "",
+    "opencode_go_base_url": "",
+    "bedrock_base_url": "",
+    "azure_foundry_base_url": "",
+    "ai_gateway_base_url": "",
 }
 
 DEFAULT_CONFIG_PATH = Path.home() / ".vyper" / "config.yml"

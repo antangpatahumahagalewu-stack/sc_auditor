@@ -17,7 +17,7 @@ RUN pip install --no-cache-dir -r requirements.txt
 COPY . .
 RUN rm -rf frontend templates
 
-COPY --from=frontend-build /frontend/static ./static
+COPY --from=frontend-build /static ./static
 
 RUN useradd --create-home appuser && chown -R appuser:appuser /app
 USER appuser

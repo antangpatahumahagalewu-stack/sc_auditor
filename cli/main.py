@@ -14,7 +14,7 @@ Usage:
     vyper logs [service]           View service logs
     vyper ps                       Show running services
     vyper restart [service]        Restart services
-    vyper dashboard                Open web dashboard
+    vyper dashboard                [removed] use 'vyper monitor' instead
     vyper daemon <action>          Manage daemon (start/stop/status)
     vyper config                   Show/edit configuration
     vyper version                  Show version
@@ -31,6 +31,8 @@ from cli.commands.audit import audit
 from cli.commands.config_cmd import config_cmd
 from cli.commands.dashboard import dashboard
 from cli.commands.docker import down, logs, ps, restart, up
+from cli.commands.monitor_cmd import app as monitor_cmd
+from cli.commands.chat_cmd import app as chat_cmd
 from cli.commands.exploit import exploit
 from cli.commands.scan import scan
 from cli.commands.status import daemon, health, list_audits, queue, stats, status
@@ -74,6 +76,11 @@ app.command("daemon")(daemon)
 
 app.command("dashboard")(dashboard)
 app.command("config")(config_cmd)
+
+# ── Monitor command ──────────────────────────────────────────────
+
+app.add_typer(monitor_cmd, name="monitor", help="Open Vyper Monitor — live terminal dashboard")
+app.add_typer(chat_cmd, name="chat", help="Open Vyper AI Chat — pipeline-aware assistant")
 
 
 # ── Version command ──────────────────────────────────────────────

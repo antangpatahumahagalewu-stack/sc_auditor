@@ -54,7 +54,7 @@ class ServiceURLs:
         default_factory=lambda: _env_or("EXPLOIT_URL", "http://localhost:8006")
     )
     agent: str = field(
-        default_factory=lambda: _env_or("AGENT_URL", "http://localhost:8014")
+        default_factory=lambda: _env_or("AGENT_URL", "http://localhost:8021")  # 8021 (hindari bentrok 04a-scanner-slither di 8014)
     )
     webhook: str = field(
         default_factory=lambda: _env_or("WEBHOOK_URL", "http://localhost:8010")

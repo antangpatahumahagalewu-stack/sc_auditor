@@ -198,7 +198,7 @@ export const api = {
   startDaemon: () => request<ApiResponse>('/api/agent/daemon/start', { method: 'POST' }),
   stopDaemon: () => request<ApiResponse>('/api/agent/daemon/stop', { method: 'POST' }),
   getAgentDaemonStatus: () => request<ApiResponse>('/api/agent/daemon/status'),
-  submitFeedback: (body: { session_id: string; rating: number; comment?: string; tags?: string[] }) =>
+  submitAgentFeedback: (body: { session_id: string; rating: number; comment?: string; tags?: string[] }) =>
     request<ApiResponse>('/api/agent/learning/feedback', { method: 'POST', body: JSON.stringify(body) }),
   getLearningStats: () => request<ApiResponse>('/api/agent/learning/stats'),
   getLearningRecommendations: (taskType?: string) =>

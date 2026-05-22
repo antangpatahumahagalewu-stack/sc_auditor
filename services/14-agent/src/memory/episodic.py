@@ -132,6 +132,10 @@ class EpisodicMemory(BaseMemory):
             return True
         return False
 
+    def __len__(self) -> int:
+        """Support len() — returns number of stored episodes."""
+        return len(self.episodes)
+
     async def clear(self) -> None:
         self.episodes.clear()
         self._save()

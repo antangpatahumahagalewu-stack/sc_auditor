@@ -233,7 +233,7 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
         service=SERVICE_NAME,
         version=SERVICE_VERSION,
         solc_versions=len(solc_versions),
-        classifier_detectors=state.classifier.get_available_detectors(),
+        classifier_noise_types=len(state.classifier.TYPE_NOISE_DETECTORS),
         fix_templates=len(state.fixer.get_available_detectors()),
     )
     yield

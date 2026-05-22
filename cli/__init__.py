@@ -10,7 +10,7 @@ Usage:
     vyper down                     Stop all Docker services
     vyper logs [service]           View service logs
     vyper ps                       Show running services
-    vyper dashboard                Open web dashboard
+    vyper dashboard                [removed] use 'vyper monitor' instead
     vyper health                   Check all service health
     vyper config                   Show configuration
 """
